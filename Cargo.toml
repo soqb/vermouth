@@ -21,6 +21,3 @@ attributes = []
 # enable this in your r-a config
 # please, please, please do not enable this during compilation.
 rust-analyzer-hack = []
-
-[package.metadata.docs.rs]
-features = ["proc-macro2"]
