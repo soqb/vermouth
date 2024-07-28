@@ -147,7 +147,7 @@ impl PartialEq for ErrorKind {
     }
 }
 
-/// The opaque error type used for parsing in `sx`.
+/// The opaque error type used for parsing.
 ///
 /// The `Error` type contains one or more errors encountered during parsing.
 ///

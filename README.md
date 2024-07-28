@@ -1,4 +1,4 @@
-# sx — a new kind of parser for procedural macros.
+# `absynthe` — a new kind of parser for procedural macros.
 
 # License
 
