@@ -1,15 +1,13 @@
-use proc_macro::{Delimiter, Group, Ident, Punct, Span, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
-use crate::{Error, Expected, Result, ToSpan, TokensExtend};
+use crate::{Error, Expected, Result, ToSpan, ToTokens, TokensExtend};
 
 /// A simple parser for Rust source which traverses [`TokenTree`]s.
 ///
-/// This type typically iterates over a [`TokenStream`],
-/// but is generic as to support many different stream implementations.
-pub struct Parser<I = proc_macro::token_stream::IntoIter> {
+pub struct Parser {
     seen: Vec<TokenTree>,
     seen_ptr: usize,
-    stream: I,
+    stream: proc_macro::token_stream::IntoIter,
     eos_span: Span,
     error_buf: Vec<Error>,
 }
@@ -35,14 +33,14 @@ impl From<Group> for Parser {
     }
 }
 
-impl<I: Iterator<Item = TokenTree>> Parser<I> {
+impl Parser {
     /// Creates a new [`Parser`].
     ///
     /// The `parent_span` argument is used to generate [end-of-stream spans](Parser::here)
     /// when the stream has no tokens.
     ///
     /// For parsing the input from a procedural macro, `parent_span` should be [`Span::call_site()`].
-    pub fn new(stream: impl IntoIterator<IntoIter = I>, parent_span: Span) -> Self {
+    pub fn new(stream: TokenStream, parent_span: Span) -> Self {
         Self {
             stream: stream.into_iter(),
             eos_span: parent_span,
@@ -149,6 +147,23 @@ impl<I: Iterator<Item = TokenTree>> Parser<I> {
         )
     }
 
+    /// Similar to [`Parser::eat_punct`], but considers the `Punct`'s spacing.
+    pub fn eat_punct_with_spacing(
+        &mut self,
+        punct: char,
+        spacing: Spacing,
+    ) -> Result<Punct, Expected> {
+        self.eat_expectantly(
+            |tok| match tok {
+                TokenTree::Punct(pt) if pt.as_char() == punct && pt.spacing() == spacing => {
+                    Some(pt)
+                }
+                _ => None,
+            },
+            |span| Expected::from_lit(span, punct.to_string()),
+        )
+    }
+
     /// Returns the position of the parser within a stream of tokens, as a [`Span`].
     ///
     /// If the parser is at the end of the stream, it returns a `Span` covering the entire stream.
@@ -173,14 +188,36 @@ impl<I: Iterator<Item = TokenTree>> Parser<I> {
     ///
     /// This is useful for backtracking when encountering errors.
     ///
-    /// This method returns the `Span` of the position the parser was at before restoring.
-    /// This span can be useful for error reporting.
+    /// This method returns the `Span` of the position the parser
+    /// was at before restoring which be useful for error reporting.
     /// See [`Parser::here`] for details on how the span is calculated.
-    pub fn restore(&mut self, ck: Checkpoint) -> Span {
+    ///
+    /// # Reporting
+    ///
+    /// **NB:** This method preserves all errors which have been [reported]
+    /// since the parser state was saved.
+    /// The rationale behind this is that errors which get reported
+    /// (as opposed to being returned in a `Result::Err`)
+    /// are typically important enough to warrant not omitting retroactively.
+    ///
+    /// If the converse behavior is required see [`Parser::restore_forgiving`].
+    ///
+    /// [reported]: Parser::report
+    pub fn restore(&mut self, point: Checkpoint) -> Span {
         let span = self.here();
-        self.seen_ptr = ck.seen_ptr;
-        self.error_buf.drain(ck.error_count..self.error_buf.len());
+        self.seen_ptr = point.seen_ptr;
         span
+    }
+
+    /// Restores the state of the parser to a [previously saved](Parser::save) [`Checkpoint`].
+    ///
+    /// This is useful for backtracking when encountering errors.
+    ///
+    /// See [`Parser::restore`] for more details and what makes this method "forgiving".
+    pub fn restore_forgiving(&mut self, point: Checkpoint) -> Span {
+        self.error_buf
+            .drain(point.error_count..self.error_buf.len());
+        self.restore(point)
     }
 
     /// Undos the consumption of a certain number of tokens.
@@ -196,9 +233,20 @@ impl<I: Iterator<Item = TokenTree>> Parser<I> {
         };
         self.restore(ck)
     }
+
+    /// Returns all compile errors [reported] during parsing.
+    ///
+    /// [reported]: Parser::report
+    pub fn compile_errors(&self) -> TokenStream {
+        let mut buf = TokenStream::new();
+        for error in &self.error_buf {
+            error.extend_tokens(&mut buf);
+        }
+        buf
+    }
 }
 
-impl<I: Iterator<Item = TokenTree>> Parser<I> {
+impl Parser {
     /// Returns a new [`Parser`] which traverses the contents of a `Group`.
     ///
     /// The `Group` must be delimited by the specified [`Delimiter`].
@@ -265,19 +313,32 @@ pub enum Finish {
 
 /// A common interface for parsing values from a [`Parser`].
 pub trait Parse: Sized {
+    /// Arguments passed to [`Parse::parse_with`].
+    ///
+    /// Note that when `Args` unconditionally implement [`Default`],
+    /// the more terse [`Parse::parse`] can be used.
     type Args<'a>;
+
     /// Parses a value from a [`Parser`], using the provided [`Args`].
     ///
     /// [`Args`]: Self::Args
-    fn parse_with<I: Iterator<Item = TokenTree>>(
-        parser: &mut Parser<I>,
-        args: Self::Args<'_>,
-    ) -> Result<Self>;
+    fn parse_with(parser: &mut Parser, args: Self::Args<'_>) -> Result<Self>;
 
-    fn parse<I: Iterator<Item = TokenTree>>(parser: &mut Parser<I>) -> Result<Self>
+    /// A terse alias for [`Parse::parse_with`] for when [`Args`] implement [`Default`].
+    ///
+    /// [`Args`]: Self::Args
+    fn parse(parser: &mut Parser) -> Result<Self>
     where
         for<'a> Self::Args<'a>: Default,
     {
         Self::parse_with(parser, Default::default())
+    }
+}
+
+impl Parse for TokenStream {
+    type Args<'a> = ();
+
+    fn parse_with(parser: &mut Parser, _args: Self::Args<'_>) -> Result<Self> {
+        Ok(parser.rest())
     }
 }

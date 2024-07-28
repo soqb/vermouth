@@ -7,13 +7,20 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/soqb/vermouth"
 rust-version = "1.80"
 
-[dependencies]
-proc-macro2 = { version = "=1.0.86", optional = true }
+[dependencies.proc-macro2]
+# we lock the version to a range since there's no tangible guarantee
+# that `proc-macro2` matches `proc_macro` in detail.
+version = ">=1, <=1.0.86"
+optional = true
 
 [features]
 default = ["attributes"]
 proc-macro2 = ["dep:proc-macro2"]
 attributes = []
+
+# enable this in your r-a config
+# please, please, please do not enable this during compilation.
+rust-analyzer-hack = []
 
 [package.metadata.docs.rs]
 features = ["proc-macro2"]

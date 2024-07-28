@@ -23,10 +23,7 @@ where
 {
     type Args<'a> = T::Args<'a>;
 
-    fn parse_with<I: Iterator<Item = TokenTree>>(
-        cx: &mut Parser<I>,
-        args: Self::Args<'_>,
-    ) -> Result<Self> {
+    fn parse_with(cx: &mut Parser, args: Self::Args<'_>) -> Result<Self> {
         let mut exp = match T::parse_with(cx, args.clone()) {
             Ok(attr) => return Ok(Self::Attr(attr)),
             Err(err) => err,
@@ -104,8 +101,8 @@ impl<O, I> Attribute<O, I> {
     }
 
     /// Parses an attribute according according to the specification provided.
-    fn parse_separately<I2: Iterator<Item = TokenTree>, A>(
-        cx: &mut Parser<I2>,
+    fn parse_separately<A>(
+        cx: &mut Parser,
         args: A,
         parse_outer: impl FnOnce(&mut Parser, A) -> Result<O>,
         parse_inner: impl FnOnce(&mut Parser, A) -> Result<I>,
@@ -152,10 +149,7 @@ where
 {
     type Args<'a> = O::Args<'a>;
 
-    fn parse_with<I2: Iterator<Item = TokenTree>>(
-        cx: &mut Parser<I2>,
-        args: Self::Args<'_>,
-    ) -> Result<Self> {
+    fn parse_with(cx: &mut Parser, args: Self::Args<'_>) -> Result<Self> {
         Self::parse_separately(cx, args, O::parse_with, I::parse_with)
     }
 }
@@ -173,10 +167,10 @@ impl<O: ToTokens, I: ToTokens> ToTokens for Attribute<O, I> {
     fn extend_tokens(&self, buf: &mut TokenStream) {
         buf.push(Punct::new('#', Spacing::Joint));
         let group = match self {
-            Attribute::Outer { contents } => contents.into_tokens(),
+            Attribute::Outer { contents } => contents.to_tokens(),
             Attribute::Inner { bang, contents } => {
                 buf.push(bang.clone());
-                contents.into_tokens()
+                contents.to_tokens()
             }
         };
         buf.push(Group::new(Delimiter::Bracket, group));

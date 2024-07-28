@@ -1,7 +1,8 @@
 #![allow(clippy::toplevel_ref_arg)]
+//! _Fortification against [sin][`syn`]._
 //! A new kind of parser for procedural macros.
 //!
-//! As opposed to [`syn`],
+//! Opposing [`syn`],
 //! this crate is designed around the philosophy that malformed input
 //! should be handled gracefully by procedural macros.
 //!
@@ -18,11 +19,20 @@ extern crate proc_macro2 as proc_macro;
 #[macro_export]
 macro_rules! ඞ_declare_test {
     () => {
-        #[cfg(not(feature = "proc-macro2"))]
+        // this... is unfortunate.
+        // we don't want to enable `cfg(feature = "proc-macro2")` for r-a,
+        // but we also don't want to disable `cfg(test)` and thus,
+        // we enable *another* feature to silence the error.
+        #[cfg(not(any(feature = "proc-macro2", feature = "rust-analyzer-hack")))]
         compile_error!(
-            "tests must be run with the `proc-macro2` feature.\n\
+            "`vermouth` tests must be run with the `proc-macro2` feature.\n\
             `proc-macro` doesn't support execution outside the rustc harness"
         );
+        // even if we just spat out a compile error,
+        // we still import a (non-functional) crate
+        // to suppress errors about bad imports.
+        #[cfg(not(feature = "proc-macro2"))]
+        extern crate proc_macro;
         #[cfg(feature = "proc-macro2")]
         extern crate proc_macro2 as proc_macro;
     };
@@ -37,3 +47,146 @@ pub use self::{error::*, parser::*, span::*, tokens::*};
 
 #[cfg(feature = "attributes")]
 pub mod attributes;
+
+#[cfg(test)]
+mod tests {
+    use proc_macro::{
+        Spacing::{Alone, Joint},
+        Span, TokenTree,
+    };
+
+    use crate::{attributes::Attribute, Expected, Parse, Parser, Result, Spanned};
+
+    ඞ_declare_test!();
+
+    macro_rules! quote_single {
+        (#) => {
+            [
+                proc_macro::TokenTree::from(proc_macro::Punct::new('#', proc_macro::Spacing::Alone)),
+            ]
+        };
+        (!) => {
+            [
+                proc_macro::TokenTree::from(proc_macro::Punct::new('!', proc_macro::Spacing::Alone)),
+            ]
+        };
+        (+) => {
+            [
+                proc_macro::TokenTree::from(proc_macro::Punct::new('+', proc_macro::Spacing::Alone)),
+            ]
+        };
+        (==) => {
+            [
+                proc_macro::TokenTree::from(proc_macro::Punct::new('=', proc_macro::Spacing::Joint)),
+                proc_macro::TokenTree::from(proc_macro::Punct::new('=', proc_macro::Spacing::Alone)),
+            ]
+        };
+        ($i:ident) => {
+            [
+                proc_macro::TokenTree::from(
+                    proc_macro::Ident::new(stringify!($i), proc_macro::Span::call_site()),
+                ),
+            ]
+        };
+        ({ $($c:tt)* }) => {
+            [
+                proc_macro::TokenTree::from(
+                    proc_macro::Group::new(proc_macro::Delimiter::Brace, quote!($($c)*)),
+                ),
+            ]
+        };
+        ([ $($c:tt)* ]) => {
+            [
+                proc_macro::TokenTree::from(
+                    proc_macro::Group::new(proc_macro::Delimiter::Bracket, quote!($($c)*)),
+                ),
+            ]
+        };
+        (( $($c:tt)* )) => {
+            [
+                proc_macro::TokenTree::from(
+                    proc_macro::Group::new(proc_macro::Delimiter::Parenthesis, quote!($($c)*)),
+                ),
+            ]
+        };
+    }
+
+    macro_rules! quote {
+        ($($t:tt)*) => {{
+            let mut buf = proc_macro::TokenStream::new();
+            $(
+                buf.extend(quote_single!($t));
+            )*
+            buf
+        }};
+    }
+
+    #[test]
+    fn parsing() {
+        let tokens = quote! { a + b == c };
+        let ref mut cx = Parser::new(tokens, Span::call_site());
+        assert_eq!(
+            cx.eat_ident().map(Spanned::from).map(|s| &**s == "a"),
+            Ok(true),
+        );
+        assert_eq!(cx.eat_punct_with_spacing('+', Alone).map(drop), Ok(()));
+        assert_eq!(
+            cx.eat_ident().map(Spanned::from).map(|s| &**s == "b"),
+            Ok(true),
+        );
+        assert_eq!(cx.eat_punct_with_spacing('=', Joint).map(drop), Ok(()));
+        assert_eq!(cx.eat_punct_with_spacing('=', Alone).map(drop), Ok(()));
+        assert_eq!(
+            cx.eat_ident().map(Spanned::from).map(|s| &**s == "c"),
+            Ok(true),
+        );
+    }
+
+    #[test]
+    fn error_reporting() {
+        let exp = Expected::never(Span::call_site())
+            .or_lit("foo")
+            .or_noun("a bar")
+            .or_lit("baz");
+        assert_eq!(format!("{exp}"), "expected `foo`, a bar, or `baz`");
+    }
+
+    #[test]
+    #[cfg(feature = "attributes")]
+    fn attributes() {
+        let tokens = quote! { #[foo] #![bar] };
+        let ref mut cx = Parser::new(tokens, Span::call_site());
+
+        struct Foo;
+        struct Bar;
+
+        impl Parse for Foo {
+            type Args<'a> = ();
+            fn parse_with(cx: &mut Parser, _args: Self::Args<'_>) -> Result<Foo> {
+                match cx.eat() {
+                    Some(TokenTree::Ident(id)) if id.to_string() == "foo" => Ok(Foo),
+                    _ => Err(Expected::from_lit(cx.gag(1), "foo")),
+                }
+            }
+        }
+
+        impl Parse for Bar {
+            type Args<'a> = ();
+            fn parse_with(cx: &mut Parser, _args: Self::Args<'_>) -> Result<Bar> {
+                match cx.eat() {
+                    Some(TokenTree::Ident(id)) if id.to_string() == "bar" => Ok(Bar),
+                    _ => Err(Expected::from_lit(cx.gag(1), "bar")),
+                }
+            }
+        }
+
+        assert!(matches!(
+            <Attribute<Foo, Bar>>::parse(cx),
+            Ok(Attribute::Outer { .. }),
+        ));
+        assert!(matches!(
+            <Attribute<Foo, Bar>>::parse(cx),
+            Ok(Attribute::Inner { .. }),
+        ));
+    }
+}

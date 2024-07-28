@@ -5,6 +5,9 @@ use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenSt
 
 use crate::{ToSpan, ToTokens, TokensExtend};
 
+/// An alias for the standard library [`Result`](core::result::Result).
+///
+/// By default, the error type is [`Expected`].
 pub type Result<T, E = Expected> = core::result::Result<T, E>;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -23,6 +26,11 @@ impl fmt::Display for Syntax {
 }
 
 /// Builds an [error](Error) which represents some syntax which was expected.
+///
+/// After construction, expectations can be chained with
+/// [`Expected::or_lit`] and [`Expected::or_noun`],
+/// or they can be inserted in place with
+/// [`Expected::push_lit`] and [`Expected::push_noun`].
 #[derive(Debug)]
 pub struct Expected {
     span: Span,
@@ -183,12 +191,6 @@ impl From<Expected> for Error {
 }
 
 impl Error {
-    pub fn expectation(expectation: Expected) -> Error {
-        Self {
-            kind: ErrorKind::Expected(expectation),
-        }
-    }
-
     // pub fn from_expected_noun(span: impl ToSpan, name: impl Into<Cow<'static, str>>) -> Error {
     //     Self {
     //         kind: ErrorKind::Expected(span.span(), Syntax::Noun(name.into())),
