@@ -1,4 +1,4 @@
-# `absynthe` — a new kind of parser for procedural macros.
+# `vermouth` — a new kind of parser for procedural macros.
 
 # License
 

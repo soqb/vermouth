@@ -45,10 +45,10 @@ impl<T> ToSpan for Spanned<T> {
 /// # Examples
 ///
 /// ```
-/// # absynthe::ඞ_declare_test!();
+/// # vermouth::ඞ_declare_test!();
 /// #
 /// use proc_macro::{Ident, Span};
-/// use absynthe::{Spanned, Result, Expected, ToSpan};
+/// use vermouth::{Spanned, Result, Expected, ToSpan};
 ///
 /// fn is_continue_kw(kw: Spanned<&str>) -> Result<()> {
 ///     if &**kw == "continue" {
