@@ -1,5 +1,5 @@
 #![allow(clippy::toplevel_ref_arg)]
-//! A new kind of `proc_macro` parser.
+//! A new kind of parser for procedural macros.
 //!
 //! See the methods on the [`Parser`] type for structural documentation.
 
