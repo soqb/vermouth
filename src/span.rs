@@ -12,24 +12,26 @@ use proc_macro::{Ident, Span, TokenTree};
 /// * [`TokenTree`]
 pub trait ToSpan {
     /// Converts a type into a [span](Span).
-    fn span(self) -> Span;
+    fn span(&self) -> Span;
 }
 
 impl ToSpan for Span {
-    fn span(self) -> Span {
-        self
+    #[inline]
+    fn span(&self) -> Span {
+        *self
     }
 }
 
-impl ToSpan for &TokenTree {
-    fn span(self) -> Span {
+impl ToSpan for TokenTree {
+    #[inline]
+    fn span(&self) -> Span {
         self.span()
     }
 }
 
-impl<T> ToSpan for &Spanned<T> {
+impl<T> ToSpan for Spanned<T> {
     #[inline]
-    fn span(self) -> Span {
+    fn span(&self) -> Span {
         self.span
     }
 }
@@ -42,16 +44,17 @@ impl<T> ToSpan for &Spanned<T> {
 ///
 /// # Examples
 ///
-/// ```ignore
-/// # extern crate proc_macro;
+/// ```
+/// # sx::ඞ_declare_test!();
+///
 /// use proc_macro::{Ident, Span};
-/// use sx::{Spanned, Result, Error, ToSpan};
+/// use sx::{Spanned, Result, Expected, ToSpan};
 ///
 /// fn is_continue_kw(kw: Spanned<&str>) -> Result<()> {
 ///     if &**kw == "continue" {
 ///         Ok(())
 ///     } else {
-///         Err(Error::from_expected_lit(kw.span(), "continue"))
+///         Err(Expected::from_lit(kw.span(), "continue"))
 ///     }
 /// }
 ///
@@ -63,6 +66,18 @@ pub struct Spanned<T> {
     inner: T,
     span: Span,
 }
+
+impl<T: PartialEq> PartialEq for Spanned<T> {
+    fn eq(&self, other: &Self) -> bool {
+        *self == other.inner
+    }
+}
+impl<T: PartialEq> PartialEq<T> for Spanned<T> {
+    fn eq(&self, other: &T) -> bool {
+        self.inner == *other
+    }
+}
+impl<T: Eq> Eq for Spanned<T> {}
 
 impl From<Ident> for Spanned<String> {
     fn from(value: Ident) -> Self {

@@ -5,7 +5,7 @@ use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenSt
 
 use crate::{ToSpan, ToTokens, TokensExtend};
 
-pub type Result<T, E = Error> = core::result::Result<T, E>;
+pub type Result<T, E = Expected> = core::result::Result<T, E>;
 
 #[derive(Debug, PartialEq, Eq)]
 enum Syntax {
@@ -22,17 +22,123 @@ impl fmt::Display for Syntax {
     }
 }
 
+/// Builds an [error](Error) which represents some syntax which was expected.
+#[derive(Debug)]
+pub struct Expected {
+    span: Span,
+    syntaxes: Vec<Syntax>,
+}
+
+impl PartialEq for Expected {
+    fn eq(&self, other: &Self) -> bool {
+        self.syntaxes == other.syntaxes
+    }
+}
+
+impl Expected {
+    /// Indicates no syntax was expected.
+    ///
+    /// For clarity, it may be preferrable
+    /// to use [`Expected::from_lit`] or [`Expected::from_noun`] directly,
+    /// rather than chaining this method and [`Expected::or_lit`] or [`Expected::or_noun`].
+    ///
+    /// # Reporting
+    ///
+    /// An error returned from `Expected::never` is displayed
+    /// as `expected no tokens`.
+    pub fn never(span: impl ToSpan) -> Self {
+        Self {
+            span: span.span(),
+            syntaxes: vec![],
+        }
+    }
+
+    /// Indicates literal syntax was expected.
+    ///
+    /// # Reporting
+    ///
+    /// Interpreted as an expected literal error, `"foo"` is displayed
+    /// as ``expected `foo` ``.
+    pub fn from_lit(span: impl ToSpan, lit: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            span: span.span(),
+            syntaxes: vec![Syntax::Literal(lit.into())],
+        }
+    }
+
+    /// Indicates the name of some syntax was expected.
+    ///
+    /// # Reporting
+    ///
+    /// Interpreted as an expected noun error, `"foo"` is displayed
+    /// exactly as written, like `expected foo`.
+    pub fn from_noun(span: impl ToSpan, noun: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            span: span.span(),
+            syntaxes: vec![Syntax::Noun(noun.into())],
+        }
+    }
+
+    pub fn push_lit(&mut self, lit: impl Into<Cow<'static, str>>) {
+        self.syntaxes.push(Syntax::Literal(lit.into()));
+    }
+    pub fn push_noun(&mut self, noun: impl Into<Cow<'static, str>>) {
+        self.syntaxes.push(Syntax::Noun(noun.into()));
+    }
+
+    /// Combines this expectation with a literal.
+    ///
+    /// # Reporting
+    ///
+    /// This could result in an error like `expected foo, bar, or baz`.
+    pub fn or_lit(mut self, lit: impl Into<Cow<'static, str>>) -> Self {
+        self.syntaxes.push(Syntax::Literal(lit.into()));
+        self
+    }
+
+    /// Combines this expectation with a noun.
+    ///
+    /// # Reporting
+    ///
+    /// This could result in an error like `expected foo, bar, or baz`.
+    pub fn or_noun(mut self, noun: impl Into<Cow<'static, str>>) -> Self {
+        self.syntaxes.push(Syntax::Noun(noun.into()));
+        self
+    }
+}
+
+impl fmt::Display for Expected {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "expected ")?;
+        let Some((last, rest)) = self.syntaxes.split_last() else {
+            return write!(f, "no tokens");
+        };
+
+        for syntax in rest {
+            write!(f, "{syntax}, ")?;
+        }
+
+        if self.syntaxes.len() > 1 {
+            write!(f, "or ")?;
+        }
+        write!(f, "{last}")
+    }
+}
+
+trait DisplayDebug: fmt::Debug + fmt::Display {}
+impl<T: fmt::Debug + fmt::Display> DisplayDebug for T {}
+
 #[derive(Debug)]
 enum ErrorKind {
-    Expected(Span, Syntax),
-    Custom(Span, Box<dyn std::error::Error>),
+    Expected(Expected),
+    Custom(Span, Box<dyn DisplayDebug>),
     Join(Vec<ErrorKind>),
 }
 
 impl PartialEq for ErrorKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (ErrorKind::Expected(_, a), ErrorKind::Expected(_, b)) => a == b,
+            (ErrorKind::Expected(a), ErrorKind::Expected(b)) => a == b,
             (ErrorKind::Join(a), ErrorKind::Join(b)) => a == b,
             // explicitly return false in this case, we don't have `PartialEq` for the dynamic error.
             (ErrorKind::Custom(_, _), ErrorKind::Custom(_, _)) => false,
@@ -48,13 +154,16 @@ impl PartialEq for ErrorKind {
 /// ## Construction
 ///
 /// Errors representing expected syntax elements can be constructed
-/// using [`Error::from_expected_lit`] and [`Error::from_expected_noun`].
+/// using the [`Expected`], and this types corresponding `From<Expected>` implementation.
 /// See their docs for more information.
 ///
 /// ## Composition
 ///
+/// For several variants of expected, but not found syntax,
+/// [`Expected`] can be composed with [`Expected::or_lit`] and [`Expected::or_noun`].
+///
 /// Discrete errors can be combined into a single error value
-/// using [`Error::flatten`] and [`Error::join`].
+/// using [`Error::and`] and [`Error::and_many`].
 ///
 /// ## Reporting
 ///
@@ -65,30 +174,26 @@ pub struct Error {
     kind: ErrorKind,
 }
 
-impl Error {
-    /// Creates an error indicating literal syntax that was expected.
-    ///
-    /// # Reporting
-    ///
-    /// Interpreted as an expected literal error, `"the syntax"` is displayed
-    /// as ``expected `the syntax` ``.
-    pub fn from_expected_lit(span: impl ToSpan, literal: impl Into<Cow<'static, str>>) -> Error {
+impl From<Expected> for Error {
+    fn from(value: Expected) -> Self {
         Self {
-            kind: ErrorKind::Expected(span.span(), Syntax::Literal(literal.into())),
+            kind: ErrorKind::Expected(value),
+        }
+    }
+}
+
+impl Error {
+    pub fn expectation(expectation: Expected) -> Error {
+        Self {
+            kind: ErrorKind::Expected(expectation),
         }
     }
 
-    /// Creates an error indicating the name of some syntax that was expected.
-    ///
-    /// # Reporting
-    ///
-    /// Interpreted as an expected noun error, `"the syntax"` is displayed
-    /// exactly as written, like `expected the syntax`.
-    pub fn from_expected_noun(span: impl ToSpan, name: impl Into<Cow<'static, str>>) -> Error {
-        Self {
-            kind: ErrorKind::Expected(span.span(), Syntax::Noun(name.into())),
-        }
-    }
+    // pub fn from_expected_noun(span: impl ToSpan, name: impl Into<Cow<'static, str>>) -> Error {
+    //     Self {
+    //         kind: ErrorKind::Expected(span.span(), Syntax::Noun(name.into())),
+    //     }
+    // }
 
     /// Creates an error with a customizable message.
     ///
@@ -96,7 +201,7 @@ impl Error {
     ///
     /// Errors creates with this constructor transparently report the message
     /// exactly as it is passed.
-    pub fn new_custom(span: impl ToSpan, msg: impl std::error::Error + 'static) -> Error {
+    pub fn custom(span: impl ToSpan, msg: impl fmt::Display + fmt::Debug + 'static) -> Error {
         Self {
             kind: ErrorKind::Custom(span.span(), Box::new(msg)),
         }
@@ -108,7 +213,7 @@ impl Error {
     ///
     /// Each error passed to this constructor
     /// generates a separate invocation of [`compile_error`].
-    pub fn flatten(errors: impl IntoIterator<Item = Error>) -> Error {
+    pub fn and_many(errors: impl IntoIterator<Item = Error>) -> Error {
         let errors = errors.into_iter();
         let mut buf = Vec::with_capacity(errors.size_hint().0);
 
@@ -133,8 +238,8 @@ impl Error {
     /// # Reporting
     ///
     /// The passed error is generated alongside those stored in `self`.
-    pub fn join(&mut self, b: Error) {
-        let a = self;
+    pub fn and(&mut self, b: impl Into<Error>) {
+        let (a, b) = (self, b.into());
         match (&mut a.kind, b.kind) {
             (ErrorKind::Join(a_buf), ErrorKind::Join(b_buf)) => {
                 a_buf.extend(b_buf);
@@ -167,11 +272,11 @@ impl Error {
         }
     }
 
-    fn try_join<T>(&mut self, res: Result<T>) -> Option<T> {
+    fn try_and<T>(&mut self, res: Result<T>) -> Option<T> {
         match res {
             Ok(ok) => Some(ok),
             Err(err) => {
-                self.join(err);
+                self.and(err);
                 None
             }
         }
@@ -181,9 +286,9 @@ impl Error {
     ///
     /// Returns `true` iff `res` is `Ok(())`.
     ///
-    /// See [`Error::join`] for semantic details.
-    pub fn try_join_ok(&mut self, res: Result<()>) -> bool {
-        self.try_join(res).is_some()
+    /// See [`Error::and`] for semantic details.
+    pub fn try_and_ok(&mut self, res: Result<()>) -> bool {
+        self.try_and(res).is_some()
     }
 }
 
@@ -215,8 +320,8 @@ impl ToTokens for ErrorKind {
         }
 
         match &self {
-            ErrorKind::Expected(span, syntax) => {
-                compile_err_call(buf, *span, &format!("expected {syntax}"))
+            ErrorKind::Expected(syntax) => {
+                compile_err_call(buf, syntax.span, &format!("expected {syntax}"))
             }
             ErrorKind::Custom(span, custom_err) => {
                 compile_err_call(buf, *span, &custom_err.to_string())

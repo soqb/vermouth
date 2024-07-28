@@ -3,8 +3,6 @@ use proc_macro::{
     TokenTree::{self, Punct},
 };
 
-use crate::{Error, Result, Spanned};
-
 pub trait TokensExtend {
     fn push(&mut self, tok: impl Into<TokenTree>);
 }
@@ -28,15 +26,9 @@ impl TokenTreeExt for TokenTree {
     }
 }
 
-pub fn expect_str(id: Spanned<&str>, p: &'static str) -> Result<()> {
-    (&**id == p)
-        .then_some(())
-        .ok_or_else(|| Error::from_expected_noun(&id, p))
-}
-
 pub trait ToTokens {
     fn extend_tokens(&self, buf: &mut TokenStream);
-    fn to_tokens(&self) -> TokenStream {
+    fn into_tokens(&self) -> TokenStream {
         let mut buf = TokenStream::new();
         self.extend_tokens(&mut buf);
         buf
@@ -44,7 +36,7 @@ pub trait ToTokens {
 }
 
 impl ToTokens for TokenStream {
-    fn to_tokens(&self) -> TokenStream {
+    fn into_tokens(&self) -> TokenStream {
         self.clone()
     }
 

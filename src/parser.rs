@@ -1,6 +1,6 @@
-use proc_macro::{Delimiter, Group, Ident, Span, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Group, Ident, Punct, Span, TokenStream, TokenTree};
 
-use crate::{Error, Result, ToSpan, TokensExtend};
+use crate::{Error, Expected, Result, ToSpan, TokensExtend};
 
 /// A simple parser for Rust source which traverses [`TokenTree`]s.
 ///
@@ -11,6 +11,7 @@ pub struct Parser<I = proc_macro::token_stream::IntoIter> {
     seen_ptr: usize,
     stream: I,
     eos_span: Span,
+    error_buf: Vec<Error>,
 }
 
 /// A location in the stream of a [`Parser`].
@@ -25,6 +26,7 @@ pub struct Parser<I = proc_macro::token_stream::IntoIter> {
 #[must_use = "saving a `Checkpoint` is useless if it is never restored"]
 pub struct Checkpoint {
     seen_ptr: usize,
+    error_count: usize,
 }
 
 impl From<Group> for Parser {
@@ -46,10 +48,40 @@ impl<I: Iterator<Item = TokenTree>> Parser<I> {
             eos_span: parent_span,
             seen: Vec::new(),
             seen_ptr: 0,
+            error_buf: Vec::new(),
+        }
+    }
+
+    /// Inserts another [`Error`] into the parser's internal error buffer.
+    ///
+    /// These errors can be retrieved with the `compile_errors` method.
+    #[inline]
+    pub fn report(&mut self, err: impl Into<Error>) {
+        self.error_buf.push(err.into());
+    }
+
+    /// If passed `Err`, [report it] and return `false` or true otherwise.
+    ///
+    /// These errors can be retrieved with the `compile_errors` method.
+    ///
+    /// [report it]: Parser::report
+    #[inline]
+    pub fn try_report(&mut self, res: Result<(), impl Into<Error>>) -> bool {
+        match res {
+            Ok(()) => true,
+            Err(err) => {
+                self.report(err);
+                false
+            }
         }
     }
 
     /// Consumes a token from the parser's internal stream.
+    ///
+    /// This is the most direct way of interacting with the parser stream.
+    ///
+    /// Note that this method returns an `Option`, rather than a `Result`,
+    /// to ensure that errors are accurate and well-handled.
     pub fn eat(&mut self) -> Option<TokenTree> {
         let opt = match self.seen.get(self.seen_ptr) {
             Some(o) => Some(o.clone()),
@@ -76,19 +108,45 @@ impl<I: Iterator<Item = TokenTree>> Parser<I> {
     /// to be used in parsing.
     pub fn eat_expectantly<T>(
         &mut self,
-        pass_if: impl FnOnce(&TokenTree) -> Option<T>,
-        expects: impl FnOnce(Span) -> Error,
-    ) -> Result<T> {
+        pass_if: impl FnOnce(TokenTree) -> Option<T>,
+        expects: impl FnOnce(Span) -> Expected,
+    ) -> Result<T, Expected> {
         let span;
         match self.eat() {
             None => span = self.here(),
-            Some(tok) => match pass_if(&tok) {
+            Some(tok) => match pass_if(tok) {
                 None => span = self.gag(1),
                 Some(res) => return Ok(res),
             },
         }
 
         Err(expects(span))
+    }
+
+    /// Returns the next token in the parser stream, if it is an [`Ident`].
+    ///
+    /// If the next token is not an `Ident`, returns a representative error.
+    pub fn eat_ident(&mut self) -> Result<Ident, Expected> {
+        self.eat_expectantly(
+            |tok| match tok {
+                TokenTree::Ident(ident) => Some(ident),
+                _ => None,
+            },
+            |span| Expected::from_noun(span, "an identifier"),
+        )
+    }
+
+    /// Returns the next token in the parser stream, if it is a particular [`Punct`].
+    ///
+    /// If the next token is not the specified `Punct`, returns a representative error.
+    pub fn eat_punct(&mut self, punct: char) -> Result<Punct, Expected> {
+        self.eat_expectantly(
+            |tok| match tok {
+                TokenTree::Punct(pt) if pt.as_char() == punct => Some(pt),
+                _ => None,
+            },
+            |span| Expected::from_lit(span, punct.to_string()),
+        )
     }
 
     /// Returns the position of the parser within a stream of tokens, as a [`Span`].
@@ -105,7 +163,10 @@ impl<I: Iterator<Item = TokenTree>> Parser<I> {
     /// This state can be returned to by [`Parser::restore`].
     pub fn save(&self) -> Checkpoint {
         let seen_ptr = self.seen_ptr;
-        Checkpoint { seen_ptr }
+        Checkpoint {
+            seen_ptr,
+            error_count: self.error_buf.len(),
+        }
     }
 
     /// Restores the state of the parser to a [previously saved](Parser::save) [`Checkpoint`].
@@ -118,15 +179,20 @@ impl<I: Iterator<Item = TokenTree>> Parser<I> {
     pub fn restore(&mut self, ck: Checkpoint) -> Span {
         let span = self.here();
         self.seen_ptr = ck.seen_ptr;
+        self.error_buf.drain(ck.error_count..self.error_buf.len());
         span
     }
 
     /// Undos the consumption of a certain number of tokens.
     ///
     /// This is a lighter, and less powerful alternative to [`Parser::save`] and [`Parser::restore`].
+    ///
+    /// Note that it is a logic error to use this method if between the target and current parser states,
+    /// an error has been [reported](Parser::report).
     pub fn gag(&mut self, n: usize) -> Span {
         let ck = Checkpoint {
             seen_ptr: self.seen_ptr - n,
+            error_count: self.error_buf.len(),
         };
         self.restore(ck)
     }
@@ -136,7 +202,7 @@ impl<I: Iterator<Item = TokenTree>> Parser<I> {
     /// Returns a new [`Parser`] which traverses the contents of a `Group`.
     ///
     /// The `Group` must be delimited by the specified [`Delimiter`].
-    pub fn delimited_by(&mut self, delim: Delimiter) -> Result<Group> {
+    pub fn eat_delimited(&mut self, delim: Delimiter) -> Result<Group, Expected> {
         match self.eat() {
             Some(TokenTree::Group(contents)) if contents.delimiter() == delim => Ok(contents),
             _ => {
@@ -146,7 +212,7 @@ impl<I: Iterator<Item = TokenTree>> Parser<I> {
                     Delimiter::Bracket => "brackets",
                     Delimiter::None => "implicit delimiters",
                 };
-                Err(Error::from_expected_noun(self.gag(1), delim_str))
+                Err(Expected::from_noun(self.gag(1), delim_str))
             }
         }
     }
@@ -199,15 +265,19 @@ pub enum Finish {
 
 /// A common interface for parsing values from a [`Parser`].
 pub trait Parse: Sized {
-    /// Parses a value from a [`Parser`].
-    fn parse<I: Iterator<Item = TokenTree>>(parser: &mut Parser<I>) -> Result<Self>;
-}
+    type Args<'a>;
+    /// Parses a value from a [`Parser`], using the provided [`Args`].
+    ///
+    /// [`Args`]: Self::Args
+    fn parse_with<I: Iterator<Item = TokenTree>>(
+        parser: &mut Parser<I>,
+        args: Self::Args<'_>,
+    ) -> Result<Self>;
 
-impl Parse for Ident {
-    fn parse<I: Iterator<Item = TokenTree>>(cx: &mut Parser<I>) -> Result<Self> {
-        match cx.eat() {
-            Some(TokenTree::Ident(i)) => Ok(i),
-            _ => Err(Error::from_expected_noun(cx.gag(1), "an identifier")),
-        }
+    fn parse<I: Iterator<Item = TokenTree>>(parser: &mut Parser<I>) -> Result<Self>
+    where
+        for<'a> Self::Args<'a>: Default,
+    {
+        Self::parse_with(parser, Default::default())
     }
 }

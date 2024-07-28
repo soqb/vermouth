@@ -5,9 +5,15 @@ edition = "2021"
 description = "a new kind of parser for procedural macros"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/soqb/sx"
+rust-version = "1.80"
 
 [dependencies]
+proc-macro2 = { version = "=1.0.86", optional = true }
 
 [features]
 default = ["attributes"]
+proc-macro2 = ["dep:proc-macro2"]
 attributes = []
+
+[package.metadata.docs.rs]
+features = ["proc-macro2"]
