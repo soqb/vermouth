@@ -2,7 +2,7 @@
 name = "sx"
 version = "0.1.0"
 edition = "2021"
-description = "a new kind of parser for procedural macro"
+description = "a new kind of parser for procedural macros"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/soqb/sx"
 

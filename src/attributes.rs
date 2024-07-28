@@ -2,12 +2,12 @@
 
 use proc_macro::{
     Delimiter, Ident, TokenStream,
-    TokenTree::{Group, Punct},
+    TokenTree::{self, Group, Punct},
 };
 
 use crate::{expect_str, Error, Finish, Parse, Parser, Result, Spanned, TokenTreeExt};
 
-/// Represents a [meta item] which may [`cfg`] or [`cfg_attr`].
+/// Represents a [meta item] which may be [`cfg`] or [`cfg_attr`].
 ///
 /// [meta item]: https://doc.rust-lang.org/nightly/reference/attributes.html#meta-item-attribute-syntax
 /// [`cfg`]: https://doc.rust-lang.org/nightly/reference/conditional-compilation.html#the-cfg-attribute
@@ -19,7 +19,7 @@ pub enum Cfgable<T> {
 }
 
 impl<T: Parse> Parse for Cfgable<T> {
-    fn parse(cx: &mut Parser) -> Result<Self> {
+    fn parse<I: Iterator<Item = TokenTree>>(cx: &mut Parser<I>) -> Result<Self> {
         let mut err = match T::parse(cx) {
             Ok(attr) => return Ok(Self::Attr(attr)),
             Err(err) => err,
@@ -37,9 +37,9 @@ impl<T: Parse> Parse for Cfgable<T> {
             let meta = cx.collect_until(
                 |tok| tok.is_punct(','),
                 |_| Ok(Finish::Void),
-                |span| Err(Error::from_expected_lit(span, ",")),
+                |span| Err(Error::from_expected_noun(span, ",")),
             )?;
-            let inner: Self = cx.parse()?;
+            let inner = Self::parse(cx)?;
 
             Ok(Cfgable::CfgAttr {
                 meta,
@@ -80,13 +80,13 @@ pub enum AttributeKind {
 }
 
 impl<T: Parse> Parse for Attribute<T> {
-    fn parse(cx: &mut Parser) -> Result<Self> {
-        cx.eat_tentatively(
+    fn parse<I: Iterator<Item = TokenTree>>(cx: &mut Parser<I>) -> Result<Self> {
+        cx.eat_expectantly(
             |tok| tok.is_punct('#').then_some(()),
             |span| Error::from_expected_noun(span, "an attribute"),
         )?;
 
-        let (kind, group) = cx.eat_tentatively(
+        let (kind, group) = cx.eat_expectantly(
             |tok| match tok {
                 Group(group) => Some((AttributeKind::Outer, Some(group.clone()))),
                 Punct(punct) if punct.as_char() == '!' => Some((AttributeKind::Inner, None)),
@@ -100,6 +100,6 @@ impl<T: Parse> Parse for Attribute<T> {
             .or_else(|_| cx.delimited_by(Delimiter::Bracket))?;
 
         let ref mut cx = Parser::from(group);
-        cx.parse().map(|contents| Attribute { contents, kind })
+        T::parse(cx).map(|contents| Attribute { contents, kind })
     }
 }

@@ -31,15 +31,24 @@ impl TokenTreeExt for TokenTree {
 pub fn expect_str(id: Spanned<&str>, p: &'static str) -> Result<()> {
     (&**id == p)
         .then_some(())
-        .ok_or_else(|| Error::from_expected_lit(&id, p))
+        .ok_or_else(|| Error::from_expected_noun(&id, p))
 }
 
 pub trait ToTokens {
-    fn to_tokens(&self) -> TokenStream;
+    fn extend_tokens(&self, buf: &mut TokenStream);
+    fn to_tokens(&self) -> TokenStream {
+        let mut buf = TokenStream::new();
+        self.extend_tokens(&mut buf);
+        buf
+    }
 }
 
 impl ToTokens for TokenStream {
     fn to_tokens(&self) -> TokenStream {
         self.clone()
+    }
+
+    fn extend_tokens(&self, buf: &mut TokenStream) {
+        buf.extend(self.clone())
     }
 }

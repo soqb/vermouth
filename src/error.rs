@@ -187,8 +187,8 @@ impl Error {
     }
 }
 
-impl ToTokens for Error {
-    fn to_tokens(&self) -> TokenStream {
+impl ToTokens for ErrorKind {
+    fn extend_tokens(&self, buf: &mut TokenStream) {
         fn compile_err_call(buf: &mut TokenStream, span: Span, msg: &str) {
             macro_rules! quote_path {
                 ($buf:ident <-) => {};
@@ -214,24 +214,24 @@ impl ToTokens for Error {
             buf.push(Punct::new(';', Spacing::Alone));
         }
 
-        fn extend_buf(buf: &mut TokenStream, error: &ErrorKind) {
-            match &error {
-                ErrorKind::Expected(span, syntax) => {
-                    compile_err_call(buf, *span, &format!("expected {syntax}"))
-                }
-                ErrorKind::Custom(span, custom_err) => {
-                    compile_err_call(buf, *span, &custom_err.to_string())
-                }
-                ErrorKind::Join(errors) => {
-                    for err in errors {
-                        extend_buf(buf, err);
-                    }
+        match &self {
+            ErrorKind::Expected(span, syntax) => {
+                compile_err_call(buf, *span, &format!("expected {syntax}"))
+            }
+            ErrorKind::Custom(span, custom_err) => {
+                compile_err_call(buf, *span, &custom_err.to_string())
+            }
+            ErrorKind::Join(errors) => {
+                for err in errors {
+                    err.extend_tokens(buf);
                 }
             }
         }
+    }
+}
 
-        let mut buf = TokenStream::new();
-        extend_buf(&mut buf, &self.kind);
-        buf
+impl ToTokens for Error {
+    fn extend_tokens(&self, buf: &mut TokenStream) {
+        self.kind.extend_tokens(buf)
     }
 }
