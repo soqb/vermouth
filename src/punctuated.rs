@@ -1,9 +1,14 @@
+/// Represents a list of values, separated and delimited by other tokens.
+///
+/// Explicitly, this type represents a list of value-separator pairs
+/// followed by zero or one trailing value.
 pub struct Punctuated<T, S> {
     pairs: Vec<(T, S)>,
     trailing: Option<T>,
 }
 
 impl<T, S> Punctuated<T, S> {
+    /// Creates a new, empty punctuated list.
     pub fn new() -> Self {
         Self {
             pairs: Vec::new(),
@@ -23,16 +28,34 @@ impl<T, S> Punctuated<T, S> {
         }
     }
 
+    /// Pushes a value and a separator.
+    ///
+    /// # Panics
+    ///
+    /// If there is already a trailing value, this method will panic
+    /// to avoid inserting two values without a separator between them.
     pub fn push_pair(&mut self, value: T, sep: S) {
         self.assert_even();
         self.pairs.push((value, sep));
     }
 
+    /// Pushes a value alone.
+    ///
+    /// # Panics
+    ///
+    /// If there is already a trailing value, this method will panic
+    /// to avoid inserting two values without a separator between them.
     pub fn push_value(&mut self, value: T) {
         self.assert_even();
         self.trailing = Some(value);
     }
 
+    /// Pushes a separator alone.
+    ///
+    /// # Panics
+    ///
+    /// If there is no trailing value, this method will panic
+    /// to avoid inserting two separators in a row.
     pub fn push_sep(&mut self, sep: S) {
         self.assert_odd();
         self.pairs.push((self.trailing.take().unwrap(), sep));
@@ -53,6 +76,11 @@ impl<T, S> Punctuated<T, S> {
 }
 
 impl<T, S: Default> Punctuated<T, S> {
+    /// Pushes a value to the punctuated list.
+    ///
+    /// If there is already a trailing value,
+    /// This will insert a value using the separator type's
+    /// [`Default`] implementation.
     pub fn push(&mut self, value: T) {
         if self.trailing.is_some() {
             self.push_sep(S::default());

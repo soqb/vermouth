@@ -1,4 +1,9 @@
-#![doc(html_logo_url = "../../../assets/logo-large2.png")]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/soqb/vermouth/trunk/assets/logo-square.png"
+)]
+#![doc(
+    html_favicon_url = "https://raw.githubusercontent.com/soqb/vermouth/trunk/assets/logo-small.png"
+)]
 #![allow(clippy::toplevel_ref_arg)]
 //! _Fortification against [sin][`syn`]._
 //! A new kind of parser for procedural macros.
