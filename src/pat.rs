@@ -41,11 +41,7 @@ use crate::{Expected, Parser, Result};
 ///     }
 /// }
 ///
-/// # fn main() -> vermouth::Result<()> {
-/// #
-/// # // evil little hack to display a line which isn't compiled.
-/// # #[cfg(any())]
-/// let ref mut cx: Parser = unimplemented!();
+/// let ref mut cx: Parser;
 /// # let ref mut cx = Parser::new(TokenStream::new(), Span::call_site());
 ///
 /// // For `Pattern::eat` and `Parser::eat` we have to specify
@@ -60,8 +56,7 @@ use crate::{Expected, Parser, Result};
 /// let parse_foo: Foo = cx.parse_with(args)?;
 ///
 /// assert_eq!(pattern_foo, parse_foo);
-/// # Ok(())
-/// # }
+/// # Ok::<_, vermouth::Expected>(())
 /// ```
 ///
 /// It is the user's choice to implement `Pattern` or `Parse`
@@ -92,62 +87,94 @@ impl Pattern for Delimiter {
 }
 
 /// Decomposes a larger token into a sequence of `char`s.
+///
+/// This is most useful for facilitating other macro implementations (like [`punct_pat`]).
+///
+/// # Examples
+///
+/// ```rust
+/// use vermouth::punct_decompose;
+///
+/// macro_rules! assert_makes_sense {
+///     ($token:tt) => {
+///         punct_decompose! {
+///             expand = expand_assert_makes_sense,
+///             fallback = { compile_error!("encountered malformed token!") },
+///             $token
+///         }
+///     }
+/// }
+///
+/// macro_rules! expand_assert_makes_sense {
+///     ($token:tt $($char:literal)*) => {
+///         let s = String::from_iter([ $($char),* ]);
+///         assert_eq!(stringify!($token), s);
+///     }
+/// }
+///
+/// assert_makes_sense!(&&);
+/// assert_makes_sense!(@);
+/// assert_makes_sense!(..);
+/// ```
+///
+/// [`punct_pat`]: crate::punct_pat
 #[macro_export]
 macro_rules! punct_decompose {
-    (expand = $macro:ident, fallback = $_:tt, &)   => { $macro!(& '&') };
-    (expand = $macro:ident, fallback = $_:tt, &&)  => { $macro!(&& '&' '&') };
-    (expand = $macro:ident, fallback = $_:tt, &=)  => { $macro!(&= '&' '=') };
-    (expand = $macro:ident, fallback = $_:tt, @)   => { $macro!(@ '@') };
-    (expand = $macro:ident, fallback = $_:tt, ^)   => { $macro!(^ '^') };
-    (expand = $macro:ident, fallback = $_:tt, ^=)  => { $macro!(^= '^' '=') };
-    (expand = $macro:ident, fallback = $_:tt, :)   => { $macro!(: ':') };
-    (expand = $macro:ident, fallback = $_:tt, ,)   => { $macro!(, ',') };
-    (expand = $macro:ident, fallback = $_:tt, .)   => { $macro!(. '.') };
-    (expand = $macro:ident, fallback = $_:tt, ..)  => { $macro!(.. '.' '.') };
-    (expand = $macro:ident, fallback = $_:tt, ...) => { $macro!(... '.' '.' '.') };
-    (expand = $macro:ident, fallback = $_:tt, ..=) => { $macro!(..= '.' '.' '=') };
-    (expand = $macro:ident, fallback = $_:tt, =)   => { $macro!(= '=') };
-    (expand = $macro:ident, fallback = $_:tt, ==)  => { $macro!(== '=' '=') };
-    (expand = $macro:ident, fallback = $_:tt, =>)  => { $macro!(=> '=' '>') };
-    (expand = $macro:ident, fallback = $_:tt, >=)  => { $macro!(>= '>' '=') };
-    (expand = $macro:ident, fallback = $_:tt, >)   => { $macro!(> '>') };
-    (expand = $macro:ident, fallback = $_:tt, <-)  => { $macro!(<- '<' '-') };
-    (expand = $macro:ident, fallback = $_:tt, <=)  => { $macro!(<= '<' '=') };
-    (expand = $macro:ident, fallback = $_:tt, <)   => { $macro!(< '<') };
-    (expand = $macro:ident, fallback = $_:tt, -)   => { $macro!(- '-') };
-    (expand = $macro:ident, fallback = $_:tt, -=)  => { $macro!(-= '-' '=') };
-    (expand = $macro:ident, fallback = $_:tt, !=)  => { $macro!(!= '!' '=') };
-    (expand = $macro:ident, fallback = $_:tt, !)   => { $macro!(! '!') };
-    (expand = $macro:ident, fallback = $_:tt, |)   => { $macro!(| '|') };
-    (expand = $macro:ident, fallback = $_:tt, |=)  => { $macro!(|= '|' '=') };
-    (expand = $macro:ident, fallback = $_:tt, ||)  => { $macro!(|| '|' '|') };
-    (expand = $macro:ident, fallback = $_:tt, ::)  => { $macro!(:: ':' ':') };
-    (expand = $macro:ident, fallback = $_:tt, %)   => { $macro!(% '%') };
-    (expand = $macro:ident, fallback = $_:tt, %=)  => { $macro!(%= '%' '=') };
-    (expand = $macro:ident, fallback = $_:tt, +)   => { $macro!(+ '+') };
-    (expand = $macro:ident, fallback = $_:tt, +=)  => { $macro!(+= '+' '=') };
-    (expand = $macro:ident, fallback = $_:tt, #)   => { $macro!(# '#') };
-    (expand = $macro:ident, fallback = $_:tt, ?)   => { $macro!(? '?') };
-    (expand = $macro:ident, fallback = $_:tt, ->)  => { $macro!(-> '-' '>') };
-    (expand = $macro:ident, fallback = $_:tt, ;)   => { $macro!(; ';') };
-    (expand = $macro:ident, fallback = $_:tt, <<)  => { $macro!(<< '<' '<') };
-    (expand = $macro:ident, fallback = $_:tt, <<=) => { $macro!(<<= '<' '<' '=') };
-    (expand = $macro:ident, fallback = $_:tt, >>)  => { $macro!(>> '>' '>') };
-    (expand = $macro:ident, fallback = $_:tt, >>=) => { $macro!(>>= '>' '>' '=') };
-    (expand = $macro:ident, fallback = $_:tt, /)   => { $macro!(/ '/') };
-    (expand = $macro:ident, fallback = $_:tt, /=)  => { $macro!(/= '/' '=') };
-    (expand = $macro:ident, fallback = $_:tt, *)   => { $macro!(* '*') };
-    (expand = $macro:ident, fallback = $_:tt, *=)  => { $macro!(*= '*' '=') };
-    (expand = $macro:ident, fallback = $_:tt, ~)   => { $macro!(~ '~') };
-    (expand = $macro:ident, fallback = $_:tt, _)   => { $macro!(_ '_') };
+    (expand = $expand:ident, fallback = $_:tt, &)   => { $expand!(& '&') };
+    (expand = $expand:ident, fallback = $_:tt, &&)  => { $expand!(&& '&' '&') };
+    (expand = $expand:ident, fallback = $_:tt, &=)  => { $expand!(&= '&' '=') };
+    (expand = $expand:ident, fallback = $_:tt, @)   => { $expand!(@ '@') };
+    (expand = $expand:ident, fallback = $_:tt, ^)   => { $expand!(^ '^') };
+    (expand = $expand:ident, fallback = $_:tt, ^=)  => { $expand!(^= '^' '=') };
+    (expand = $expand:ident, fallback = $_:tt, :)   => { $expand!(: ':') };
+    (expand = $expand:ident, fallback = $_:tt, ,)   => { $expand!(, ',') };
+    (expand = $expand:ident, fallback = $_:tt, .)   => { $expand!(. '.') };
+    (expand = $expand:ident, fallback = $_:tt, ..)  => { $expand!(.. '.' '.') };
+    (expand = $expand:ident, fallback = $_:tt, ...) => { $expand!(... '.' '.' '.') };
+    (expand = $expand:ident, fallback = $_:tt, ..=) => { $expand!(..= '.' '.' '=') };
+    (expand = $expand:ident, fallback = $_:tt, =)   => { $expand!(= '=') };
+    (expand = $expand:ident, fallback = $_:tt, ==)  => { $expand!(== '=' '=') };
+    (expand = $expand:ident, fallback = $_:tt, =>)  => { $expand!(=> '=' '>') };
+    (expand = $expand:ident, fallback = $_:tt, >=)  => { $expand!(>= '>' '=') };
+    (expand = $expand:ident, fallback = $_:tt, >)   => { $expand!(> '>') };
+    (expand = $expand:ident, fallback = $_:tt, <-)  => { $expand!(<- '<' '-') };
+    (expand = $expand:ident, fallback = $_:tt, <=)  => { $expand!(<= '<' '=') };
+    (expand = $expand:ident, fallback = $_:tt, <)   => { $expand!(< '<') };
+    (expand = $expand:ident, fallback = $_:tt, -)   => { $expand!(- '-') };
+    (expand = $expand:ident, fallback = $_:tt, -=)  => { $expand!(-= '-' '=') };
+    (expand = $expand:ident, fallback = $_:tt, !=)  => { $expand!(!= '!' '=') };
+    (expand = $expand:ident, fallback = $_:tt, !)   => { $expand!(! '!') };
+    (expand = $expand:ident, fallback = $_:tt, |)   => { $expand!(| '|') };
+    (expand = $expand:ident, fallback = $_:tt, |=)  => { $expand!(|= '|' '=') };
+    (expand = $expand:ident, fallback = $_:tt, ||)  => { $expand!(|| '|' '|') };
+    (expand = $expand:ident, fallback = $_:tt, ::)  => { $expand!(:: ':' ':') };
+    (expand = $expand:ident, fallback = $_:tt, %)   => { $expand!(% '%') };
+    (expand = $expand:ident, fallback = $_:tt, %=)  => { $expand!(%= '%' '=') };
+    (expand = $expand:ident, fallback = $_:tt, +)   => { $expand!(+ '+') };
+    (expand = $expand:ident, fallback = $_:tt, +=)  => { $expand!(+= '+' '=') };
+    (expand = $expand:ident, fallback = $_:tt, #)   => { $expand!(# '#') };
+    (expand = $expand:ident, fallback = $_:tt, ?)   => { $expand!(? '?') };
+    (expand = $expand:ident, fallback = $_:tt, ->)  => { $expand!(-> '-' '>') };
+    (expand = $expand:ident, fallback = $_:tt, ;)   => { $expand!(; ';') };
+    (expand = $expand:ident, fallback = $_:tt, <<)  => { $expand!(<< '<' '<') };
+    (expand = $expand:ident, fallback = $_:tt, <<=) => { $expand!(<<= '<' '<' '=') };
+    (expand = $expand:ident, fallback = $_:tt, >>)  => { $expand!(>> '>' '>') };
+    (expand = $expand:ident, fallback = $_:tt, >>=) => { $expand!(>>= '>' '>' '=') };
+    (expand = $expand:ident, fallback = $_:tt, /)   => { $expand!(/ '/') };
+    (expand = $expand:ident, fallback = $_:tt, /=)  => { $expand!(/= '/' '=') };
+    (expand = $expand:ident, fallback = $_:tt, *)   => { $expand!(* '*') };
+    (expand = $expand:ident, fallback = $_:tt, *=)  => { $expand!(*= '*' '=') };
+    (expand = $expand:ident, fallback = $_:tt, ~)   => { $expand!(~ '~') };
+    (expand = $expand:ident, fallback = $_:tt, _)   => { $expand!(_ '_') };
 
-    (expand = $macro:ident, fallback = { $($fallback:tt)* }, $($tt:tt)+) => {
+    (expand = $_:ident, fallback = { $($fallback:tt)* }, $($tt:tt)+) => {
         $($fallback)*
     }
 }
 
+/// Expands a macro with every distinct (supported) sequence of punctuation.
 #[macro_export]
-macro_rules! for_all_punct_combos {
+macro_rules! for_all_punct_seqs {
     ($expand:ident) => {
         $expand! {
             &
@@ -234,23 +261,47 @@ impl<'a> Pattern for PunctPat<'a> {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! ඞ_punct_pat_def {
-        ($tt:tt $($char:literal)+) => {
-            $crate::PunctPat::new(
-                &[ $($char),* ],
-                stringify!($tt),
-            )
-        };
-    }
+    ($tt:tt $($char:literal)+) => {
+        $crate::PunctPat::new(
+            &[ $($char),* ],
+            stringify!($tt),
+        )
+    };
+}
 
+/// Transforms a sequence of punctuation (like `&&` or `..=`) into a [`PunctPat`].
+///
+/// The subsequent `PunctPat` implements [`Pattern`],
+/// and so can be used with methods like [`Parser::eat`].
+///
+/// # Examples
+///
+/// ```
+/// # vermouth::ඞ_declare_test!();
+/// # use proc_macro::{TokenStream, TokenTree, Span, Punct, Spacing::{Joint, Alone}};
+/// use vermouth::{Parser, punct_pat};
+///
+/// let ref mut cx: Parser;
+/// # let stream = TokenStream::from_iter([
+/// #     TokenTree::from(Punct::new('.', Joint)),
+/// #     TokenTree::from(Punct::new('.', Joint)),
+/// #     TokenTree::from(Punct::new('=', Alone)),
+/// # ]);
+/// # let ref mut cx = Parser::new(stream, Span::call_site());
+/// assert_eq!(
+///     cx.eat(punct_pat!(..=)),
+///     Ok(()),
+/// );
+/// ```
 #[macro_export]
 macro_rules! punct_pat {
-        ($($t:tt)+) => {{
-            #[allow(unused_imports)]
-            use $crate::ඞ_punct_pat_def;
-            $crate::punct_decompose!(
-                expand = ඞ_punct_pat_def,
-                fallback = { ::core::compile_error!("unrecognised token") },
-                $($t)+
-            )
-        }};
-    }
+    ($($t:tt)+) => {{
+        #[allow(unused_imports)]
+        use $crate::ඞ_punct_pat_def;
+        $crate::punct_decompose!(
+            expand = ඞ_punct_pat_def,
+            fallback = { ::core::compile_error!("unrecognised token") },
+            $($t)+
+        )
+    }};
+}

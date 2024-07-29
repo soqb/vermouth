@@ -27,7 +27,7 @@ impl fmt::Display for Syntax {
 
 /// Builds an [error](Error) which represents some syntax which was expected.
 ///
-/// After construction, expectations can be chained with
+/// After construction, syntax variants can be chained with
 /// [`Expected::or_lit`] and [`Expected::or_noun`],
 /// or they can be inserted in place with
 /// [`Expected::push_lit`] and [`Expected::push_noun`].
@@ -57,10 +57,17 @@ impl Expected {
     /// to use [`Expected::lit`] or [`Expected::noun`] directly,
     /// rather than chaining this method and [`Expected::or_lit`] or [`Expected::or_noun`].
     ///
-    /// # Reporting
+    /// # Examples
     ///
-    /// An error returned from `Expected::nothing` is displayed
-    /// as `expected no tokens`.
+    /// ```
+    /// # vermouth::ඞ_declare_test!();
+    /// # use proc_macro::Span;
+    /// # use vermouth::Expected;
+    /// #
+    /// # let span = Span::call_site();
+    /// let error = Expected::nothing(span);
+    /// assert_eq!(error.to_string(), "expected no tokens");
+    /// ```
     #[inline]
     pub fn nothing(span: impl ToSpan) -> Self {
         Self {
@@ -71,10 +78,17 @@ impl Expected {
 
     /// Indicates literal syntax was expected.
     ///
-    /// # Reporting
+    /// # Examples
     ///
-    /// Interpreted as an expected literal error, `"foo"` is displayed
-    /// as ``expected `foo` ``.
+    /// ```
+    /// # vermouth::ඞ_declare_test!();
+    /// # use proc_macro::Span;
+    /// # use vermouth::Expected;
+    /// #
+    /// # let span = Span::call_site();
+    /// let error = Expected::lit(span, "foo");
+    /// assert_eq!(error.to_string(), "expected `foo`");
+    /// ```
     #[inline]
     pub fn lit(span: impl ToSpan, lit: impl Into<Cow<'static, str>>) -> Self {
         Self {
@@ -85,10 +99,17 @@ impl Expected {
 
     /// Indicates the name of some syntax was expected.
     ///
-    /// # Reporting
+    /// # Examples
     ///
-    /// Interpreted as an expected noun error, `"foo"` is displayed
-    /// exactly as written, like `expected foo`.
+    /// ```
+    /// # vermouth::ඞ_declare_test!();
+    /// # use proc_macro::Span;
+    /// # use vermouth::Expected;
+    /// #
+    /// # let span = Span::call_site();
+    /// let error = Expected::noun(span, "a bar");
+    /// assert_eq!(error.to_string(), "expected a bar");
+    /// ```
     #[inline]
     pub fn noun(span: impl ToSpan, noun: impl Into<Cow<'static, str>>) -> Self {
         Self {
@@ -97,20 +118,59 @@ impl Expected {
         }
     }
 
+    /// Pushes a literal variant into this expectation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # vermouth::ඞ_declare_test!();
+    /// # use proc_macro::Span;
+    /// # use vermouth::Expected;
+    /// #
+    /// # let span = Span::call_site();
+    /// let mut error = Expected::lit(span, "foo");
+    /// error.push_lit("bar");
+    /// error.push_lit("baz");
+    /// assert_eq!(error.to_string(), "expected `foo`, `bar`, or `baz`");
+    /// ```
     #[inline]
     pub fn push_lit(&mut self, lit: impl Into<Cow<'static, str>>) {
         self.syntaxes.push(Syntax::Literal(lit.into()));
     }
+
+    /// Pushes a named variant into this expectation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # vermouth::ඞ_declare_test!();
+    /// # use proc_macro::Span;
+    /// # use vermouth::Expected;
+    /// #
+    /// # let span = Span::call_site();
+    /// let mut error = Expected::noun(span, "some foo");
+    /// error.push_noun("any kind of bar");
+    /// error.push_noun("a baz");
+    /// assert_eq!(error.to_string(), "expected some foo, any kind of bar, or a baz");
+    /// ```
     #[inline]
     pub fn push_noun(&mut self, noun: impl Into<Cow<'static, str>>) {
         self.syntaxes.push(Syntax::Noun(noun.into()));
     }
 
-    /// Combines this expectation with a literal.
+    /// Combines this expectation with a literal variant.
     ///
-    /// # Reporting
+    /// # Examples
     ///
-    /// This could result in an error like `expected foo, bar, or baz`.
+    /// ```
+    /// # vermouth::ඞ_declare_test!();
+    /// # use proc_macro::Span;
+    /// # use vermouth::Expected;
+    /// #
+    /// # let span = Span::call_site();
+    /// let error = Expected::nothing(span).or_lit("foo").or_noun("any bar");
+    /// assert_eq!(error.to_string(), "expected `foo`, or any bar");
+    /// ```
     #[inline]
     pub fn or_lit(mut self, lit: impl Into<Cow<'static, str>>) -> Self {
         self.push_lit(lit);
@@ -119,9 +179,17 @@ impl Expected {
 
     /// Combines this expectation with a noun.
     ///
-    /// # Reporting
+    /// # Examples
     ///
-    /// This could result in an error like `expected foo, bar, or baz`.
+    /// ```
+    /// # vermouth::ඞ_declare_test!();
+    /// # use proc_macro::Span;
+    /// # use vermouth::Expected;
+    /// #
+    /// # let span = Span::call_site();
+    /// let error = Expected::nothing(span).or_noun("some foo").or_lit("bar");
+    /// assert_eq!(error.to_string(), "expected some foo, or `bar`");
+    /// ```
     #[inline]
     pub fn or_noun(mut self, noun: impl Into<Cow<'static, str>>) -> Self {
         self.push_noun(noun);
