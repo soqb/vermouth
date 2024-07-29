@@ -123,7 +123,7 @@ impl<O, I> Attribute<O, I> {
                 TokenTree::Punct(punct) if punct.as_char() == '!' => Some(Kind::Inner(punct)),
                 _ => None,
             },
-            |span| Expected::lit(span, "!").or_noun("brackets"),
+            |span| Expected::lit(span, "!").or_noun("square brackets"),
         )?;
 
         if let Kind::Outer = &kind {

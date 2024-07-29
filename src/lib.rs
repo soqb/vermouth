@@ -1,3 +1,4 @@
+#![doc(html_logo_url = "../../../assets/logo-large2.png")]
 #![allow(clippy::toplevel_ref_arg)]
 //! _Fortification against [sin][`syn`]._
 //! A new kind of parser for procedural macros.
@@ -42,6 +43,7 @@ mod error;
 mod ext;
 mod parser;
 mod pat;
+mod punctuated;
 mod span;
 
 pub use self::{error::*, ext::*, parser::*, pat::*, span::*};

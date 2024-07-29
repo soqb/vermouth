@@ -77,7 +77,7 @@ impl Pattern for Delimiter {
                 let delim_str = match self {
                     Delimiter::Parenthesis => "parentheses",
                     Delimiter::Brace => "braces",
-                    Delimiter::Bracket => "brackets",
+                    Delimiter::Bracket => "square brackets",
                     Delimiter::None => "implicit delimiters",
                 };
                 Err(Expected::noun(cx.gag(1), delim_str))
