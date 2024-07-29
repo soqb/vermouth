@@ -39,23 +39,21 @@ macro_rules! ඞ_declare_test {
 }
 
 mod error;
+mod ext;
 mod parser;
+mod pat;
 mod span;
-mod tokens;
 
-pub use self::{error::*, parser::*, span::*, tokens::*};
+pub use self::{error::*, ext::*, parser::*, pat::*, span::*};
 
 #[cfg(feature = "attributes")]
 pub mod attributes;
 
 #[cfg(test)]
 mod tests {
-    use proc_macro::{
-        Spacing::{Alone, Joint},
-        Span, TokenTree,
-    };
+    use proc_macro::{Span, TokenTree};
 
-    use crate::{attributes::Attribute, Expected, Parse, Parser, Result, Spanned};
+    use crate::{attributes::Attribute, punct_pat, Expected, Parse, Parser, Result, Spanned};
 
     ඞ_declare_test!();
 
@@ -126,25 +124,24 @@ mod tests {
         let tokens = quote! { a + b == c };
         let ref mut cx = Parser::new(tokens, Span::call_site());
         assert_eq!(
-            cx.eat_ident().map(Spanned::from).map(|s| &**s == "a"),
+            cx.eat_ident().map(Spanned::from).map(|s| s == "a"),
             Ok(true),
         );
-        assert_eq!(cx.eat_punct_with_spacing('+', Alone).map(drop), Ok(()));
+        assert_eq!(cx.eat(punct_pat!(+)), Ok(()));
         assert_eq!(
-            cx.eat_ident().map(Spanned::from).map(|s| &**s == "b"),
+            cx.eat_ident().map(Spanned::from).map(|s| s == "b"),
             Ok(true),
         );
-        assert_eq!(cx.eat_punct_with_spacing('=', Joint).map(drop), Ok(()));
-        assert_eq!(cx.eat_punct_with_spacing('=', Alone).map(drop), Ok(()));
+        assert_eq!(cx.eat(punct_pat!(==)), Ok(()));
         assert_eq!(
-            cx.eat_ident().map(Spanned::from).map(|s| &**s == "c"),
+            cx.eat_ident().map(Spanned::from).map(|s| s == "c"),
             Ok(true),
         );
     }
 
     #[test]
     fn error_reporting() {
-        let exp = Expected::never(Span::call_site())
+        let exp = Expected::nothing(Span::call_site())
             .or_lit("foo")
             .or_noun("a bar")
             .or_lit("baz");
@@ -163,30 +160,36 @@ mod tests {
         impl Parse for Foo {
             type Args<'a> = ();
             fn parse_with(cx: &mut Parser, _args: Self::Args<'_>) -> Result<Foo> {
-                match cx.eat() {
-                    Some(TokenTree::Ident(id)) if id.to_string() == "foo" => Ok(Foo),
-                    _ => Err(Expected::from_lit(cx.gag(1), "foo")),
-                }
+                cx.eat_expectantly(
+                    |tok| match tok {
+                        TokenTree::Ident(id) if id.to_string() == "foo" => Some(Foo),
+                        _ => None,
+                    },
+                    |span| Expected::lit(span, "foo"),
+                )
             }
         }
 
         impl Parse for Bar {
             type Args<'a> = ();
             fn parse_with(cx: &mut Parser, _args: Self::Args<'_>) -> Result<Bar> {
-                match cx.eat() {
-                    Some(TokenTree::Ident(id)) if id.to_string() == "bar" => Ok(Bar),
-                    _ => Err(Expected::from_lit(cx.gag(1), "bar")),
-                }
+                cx.eat_expectantly(
+                    |tok| match tok {
+                        TokenTree::Ident(id) if id.to_string() == "bar" => Some(Bar),
+                        _ => None,
+                    },
+                    |span| Expected::lit(span, "bar"),
+                )
             }
         }
 
         assert!(matches!(
             <Attribute<Foo, Bar>>::parse(cx),
-            Ok(Attribute::Outer { .. }),
+            Ok(Attribute::Outer { contents: Foo }),
         ));
         assert!(matches!(
             <Attribute<Foo, Bar>>::parse(cx),
-            Ok(Attribute::Inner { .. }),
+            Ok(Attribute::Inner { contents: Bar, .. }),
         ));
     }
 }

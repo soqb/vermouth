@@ -7,6 +7,7 @@ pub trait TokensExtend {
 }
 
 impl TokensExtend for TokenStream {
+    #[inline]
     fn push(&mut self, tok: impl Into<TokenTree>) {
         self.extend(Some(tok.into()))
     }
@@ -21,6 +22,7 @@ pub trait TokenTreeExt {
 }
 
 impl TokenTreeExt for TokenTree {
+    #[inline]
     fn is_punct(&self, c: char) -> bool {
         match self {
             TokenTree::Punct(p) => p.as_char() == c,
@@ -34,6 +36,7 @@ pub trait ToTokens {
     /// Extends an existing [`TokenStream`] with the contents of a value.
     fn extend_tokens(&self, buf: &mut TokenStream);
     /// Builds a [`TokenStream`] from a value.
+    #[inline]
     fn to_tokens(&self) -> TokenStream {
         let mut buf = TokenStream::new();
         self.extend_tokens(&mut buf);
@@ -42,10 +45,12 @@ pub trait ToTokens {
 }
 
 impl ToTokens for TokenStream {
+    #[inline]
     fn to_tokens(&self) -> TokenStream {
         self.clone()
     }
 
+    #[inline]
     fn extend_tokens(&self, buf: &mut TokenStream) {
         buf.extend(self.clone())
     }

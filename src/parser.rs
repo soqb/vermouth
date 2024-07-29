@@ -1,6 +1,6 @@
-use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
+use proc_macro::{Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
-use crate::{Error, Expected, Result, ToSpan, ToTokens, TokensExtend};
+use crate::{Error, Expected, Pattern, Result, ToSpan, ToTokens, TokensExtend};
 
 /// A simple parser for Rust source which traverses [`TokenTree`]s.
 ///
@@ -52,15 +52,15 @@ impl Parser {
 
     /// Inserts another [`Error`] into the parser's internal error buffer.
     ///
-    /// These errors can be retrieved with the `compile_errors` method.
+    /// These errors can be retrieved with the [`Parser::compile_errors`] method.
     #[inline]
     pub fn report(&mut self, err: impl Into<Error>) {
         self.error_buf.push(err.into());
     }
 
-    /// If passed `Err`, [report it] and return `false` or true otherwise.
+    /// If passed `Err`, [report it] and return `false`. Returns `true` otherwise.
     ///
-    /// These errors can be retrieved with the `compile_errors` method.
+    /// These errors can be retrieved with the [`Parser::compile_errors`] method.
     ///
     /// [report it]: Parser::report
     #[inline]
@@ -80,7 +80,7 @@ impl Parser {
     ///
     /// Note that this method returns an `Option`, rather than a `Result`,
     /// to ensure that errors are accurate and well-handled.
-    pub fn eat(&mut self) -> Option<TokenTree> {
+    pub fn nibble(&mut self) -> Option<TokenTree> {
         let opt = match self.seen.get(self.seen_ptr) {
             Some(o) => Some(o.clone()),
             None => self
@@ -95,9 +95,33 @@ impl Parser {
         })
     }
 
-    /// A combinator for [`Parser::eat`], which enables graceful error reporting.
+    /// Parses a value from the parser's internal stream using a pattern for context.
     ///
-    /// Both in the case that there are no tokens in the parser's stream ([`Parser::eat`] returns `None`),
+    /// This method is an ergonomic alias for [`Pattern::eat`].
+    pub fn eat<T: Pattern>(&mut self, hungry_guy: T) -> Result<T::Output> {
+        hungry_guy.eat(self)
+    }
+
+    /// Parses a value from the parser's internal stream using some arguments for context.
+    ///
+    /// This method is an ergonomic alias for [`Parse::parse_with`].
+    pub fn parse_with<T: Parse>(&mut self, args: T::Args<'_>) -> Result<T> {
+        T::parse_with(self, args)
+    }
+
+    /// Parses a value from the parser's internal stream without context.
+    ///
+    /// This method is an ergonomic alias for [`Parse::parse`].
+    pub fn parse<T: Parse>(&mut self) -> Result<T>
+    where
+        for<'a> T::Args<'a>: Default,
+    {
+        T::parse(self)
+    }
+
+    /// A combinator for [`Parser::nibble`], which enables graceful, consistent error reporting.
+    ///
+    /// Both in the case that there are no tokens in the parser's stream ([`Parser::nibble`] returns `None`),
     /// and in the case that `None` is returned from the `pass_if` argument,
     /// the same error (supplied by the `expects` argument) is returned.
     ///
@@ -110,7 +134,7 @@ impl Parser {
         expects: impl FnOnce(Span) -> Expected,
     ) -> Result<T, Expected> {
         let span;
-        match self.eat() {
+        match self.nibble() {
             None => span = self.here(),
             Some(tok) => match pass_if(tok) {
                 None => span = self.gag(1),
@@ -130,7 +154,7 @@ impl Parser {
                 TokenTree::Ident(ident) => Some(ident),
                 _ => None,
             },
-            |span| Expected::from_noun(span, "an identifier"),
+            |span| Expected::noun(span, "an identifier"),
         )
     }
 
@@ -143,7 +167,7 @@ impl Parser {
                 TokenTree::Punct(pt) if pt.as_char() == punct => Some(pt),
                 _ => None,
             },
-            |span| Expected::from_lit(span, punct.to_string()),
+            |span| Expected::lit(span, punct.to_string()),
         )
     }
 
@@ -160,7 +184,7 @@ impl Parser {
                 }
                 _ => None,
             },
-            |span| Expected::from_lit(span, punct.to_string()),
+            |span| Expected::lit(span, punct.to_string()),
         )
     }
 
@@ -194,7 +218,8 @@ impl Parser {
     ///
     /// # Reporting
     ///
-    /// **NB:** This method preserves all errors which have been [reported]
+    /// **NB:** This method is "unforgiving"
+    /// in that it preserves all errors which have been [reported]
     /// since the parser state was saved.
     /// The rationale behind this is that errors which get reported
     /// (as opposed to being returned in a `Result::Err`)
@@ -213,6 +238,8 @@ impl Parser {
     ///
     /// This is useful for backtracking when encountering errors.
     ///
+    /// # Reporting
+    ///
     /// See [`Parser::restore`] for more details and what makes this method "forgiving".
     pub fn restore_forgiving(&mut self, point: Checkpoint) -> Span {
         self.error_buf
@@ -224,8 +251,9 @@ impl Parser {
     ///
     /// This is a lighter, and less powerful alternative to [`Parser::save`] and [`Parser::restore`].
     ///
-    /// Note that it is a logic error to use this method if between the target and current parser states,
-    /// an error has been [reported](Parser::report).
+    /// # Reporting
+    ///
+    /// **NB:** This method has the same "unforgiving" effects on error reporting as [`Parser::restore`].
     pub fn gag(&mut self, n: usize) -> Span {
         let ck = Checkpoint {
             seen_ptr: self.seen_ptr - n,
@@ -247,24 +275,6 @@ impl Parser {
 }
 
 impl Parser {
-    /// Returns a new [`Parser`] which traverses the contents of a `Group`.
-    ///
-    /// The `Group` must be delimited by the specified [`Delimiter`].
-    pub fn eat_delimited(&mut self, delim: Delimiter) -> Result<Group, Expected> {
-        match self.eat() {
-            Some(TokenTree::Group(contents)) if contents.delimiter() == delim => Ok(contents),
-            _ => {
-                let delim_str = match delim {
-                    Delimiter::Parenthesis => "parentheses",
-                    Delimiter::Brace => "braces",
-                    Delimiter::Bracket => "brackets",
-                    Delimiter::None => "implicit delimiters",
-                };
-                Err(Expected::from_noun(self.gag(1), delim_str))
-            }
-        }
-    }
-
     /// Collects all tokens until a condition is met.
     ///
     /// The behavior of the final token is specified by [`Finish`],
@@ -276,7 +286,7 @@ impl Parser {
         eos_behavior: impl FnOnce(Span) -> Result<()>,
     ) -> Result<TokenStream> {
         let mut buf = TokenStream::new();
-        while let Some(tok) = self.eat() {
+        while let Some(tok) = self.nibble() {
             if stop_condition(&tok) {
                 match stop_behavior(&tok)? {
                     Finish::Eat => buf.push(tok),
@@ -312,14 +322,25 @@ pub enum Finish {
 }
 
 /// A common interface for parsing values from a [`Parser`].
+///
+/// Often, this trait is interfaced through the `Parser` type itself
+/// with [`Parser::parse_with`] and [`Parser::parse`].
+///
+/// # Comparison with [`Pattern`]
+///
+/// For a comparison with the `Pattern` trait,
+/// which provides a similar yet distinct API,
+/// see [that trait's documentation].
+///
+/// [that trait's documentation]: Pattern#comparison-with-parse
 pub trait Parse: Sized {
     /// Arguments passed to [`Parse::parse_with`].
-    ///
-    /// Note that when `Args` unconditionally implement [`Default`],
-    /// the more terse [`Parse::parse`] can be used.
     type Args<'a>;
 
     /// Parses a value from a [`Parser`], using the provided [`Args`].
+    ///
+    /// Note that when `Args` unconditionally implement [`Default`],
+    /// the more terse [`Parse::parse`] method can be used.
     ///
     /// [`Args`]: Self::Args
     fn parse_with(parser: &mut Parser, args: Self::Args<'_>) -> Result<Self>;

@@ -54,7 +54,7 @@ impl<T> ToSpan for Spanned<T> {
 ///     if &**kw == "continue" {
 ///         Ok(())
 ///     } else {
-///         Err(Expected::from_lit(kw.span(), "continue"))
+///         Err(Expected::lit(kw.span(), "continue"))
 ///     }
 /// }
 ///
@@ -67,17 +67,11 @@ pub struct Spanned<T> {
     span: Span,
 }
 
-impl<T: PartialEq> PartialEq for Spanned<T> {
-    fn eq(&self, other: &Self) -> bool {
-        *self == other.inner
-    }
-}
-impl<T: PartialEq> PartialEq<T> for Spanned<T> {
-    fn eq(&self, other: &T) -> bool {
+impl<R, T: PartialEq<R>> PartialEq<R> for Spanned<T> {
+    fn eq(&self, other: &R) -> bool {
         self.inner == *other
     }
 }
-impl<T: Eq> Eq for Spanned<T> {}
 
 impl From<Ident> for Spanned<String> {
     fn from(value: Ident) -> Self {

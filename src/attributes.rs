@@ -40,7 +40,7 @@ where
                 false
             })
         {
-            let ref mut cx: Parser = cx.eat_delimited(Delimiter::Parenthesis)?.into();
+            let ref mut cx: Parser = cx.eat(Delimiter::Parenthesis)?.into();
             Ok(Cfgable::Cfg { meta: cx.rest() })
         } else if (ident == "cfg_attr")
             .then_some(())
@@ -50,12 +50,12 @@ where
                 false
             })
         {
-            let ref mut cx: Parser = cx.eat_delimited(Delimiter::Parenthesis)?.into();
+            let ref mut cx: Parser = cx.eat(Delimiter::Parenthesis)?.into();
 
             let meta = cx.collect_until(
                 |tok| tok.is_punct(','),
                 |_| Ok(Finish::Void),
-                |span| Err(Expected::from_lit(span, ",").into()),
+                |span| Err(Expected::lit(span, ",").into()),
             )?;
             let inner = Self::parse_with(cx, args)?;
 
@@ -100,7 +100,7 @@ impl<O, I> Attribute<O, I> {
         }
     }
 
-    /// Parses an attribute according according to the specification provided.
+    /// Parses an attribute according to the specification provided.
     fn parse_separately<A>(
         cx: &mut Parser,
         args: A,
@@ -109,7 +109,7 @@ impl<O, I> Attribute<O, I> {
     ) -> Result<Attribute<O, I>> {
         cx.eat_expectantly(
             |tok| tok.is_punct('#').then_some(()),
-            |span| Expected::from_lit(span, "an attribute"),
+            |span| Expected::lit(span, "an attribute"),
         )?;
 
         enum Kind {
@@ -123,16 +123,16 @@ impl<O, I> Attribute<O, I> {
                 TokenTree::Punct(punct) if punct.as_char() == '!' => Some(Kind::Inner(punct)),
                 _ => None,
             },
-            |span| Expected::from_lit(span, "!").or_noun("brackets"),
+            |span| Expected::lit(span, "!").or_noun("brackets"),
         )?;
 
         if let Kind::Outer = &kind {
             cx.gag(1);
         }
 
-        let group = cx.eat_delimited(Delimiter::Bracket)?;
-
+        let group = cx.eat(Delimiter::Bracket)?;
         let ref mut cx = Parser::from(group);
+
         match kind {
             Kind::Outer => parse_outer(cx, args).map(|contents| Attribute::Outer { contents }),
             Kind::Inner(bang) => {
