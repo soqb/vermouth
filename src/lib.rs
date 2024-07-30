@@ -6,6 +6,11 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(clippy::toplevel_ref_arg)]
+#![cfg_attr(
+    feature = "unstable-diagnostics-backend",
+    feature(proc_macro_diagnostic)
+)]
+
 //! _Fortification against [sin][`syn`]._
 //! A new kind of parser for procedural macros.
 //!
@@ -61,7 +66,9 @@ pub mod punctuated;
 
 #[cfg(test)]
 mod tests {
-    use proc_macro::{Span, TokenTree};
+    use std::iter;
+
+    use proc_macro::{Ident, Span, TokenStream, TokenTree};
 
     use crate::{
         attributes::Attribute, punct_pat, Expected, Parse, Parser, ParserPos, Result, Spanned,
@@ -160,6 +167,79 @@ mod tests {
         assert_eq!(exp.to_string(), "expected `foo`, a bar, or `baz`");
     }
 
+    #[test]
+    fn parser_indices() {
+        #[track_caller]
+        fn is_at(cx: &mut Parser, idx: usize) {
+            assert_eq!(cx.pos().raw_idx(), idx, "is_at: parser indices mismatch");
+        }
+
+        #[track_caller]
+        fn nibbles_to(cx: &mut Parser, idx: usize, v: char) {
+            // is_at(cx, idx - 1);
+
+            let (tt, pos) = cx.nibble();
+            assert_eq!(
+                tt.and_then(|tt| match tt {
+                    TokenTree::Ident(id) => Some(id.to_string()),
+                    _ => None,
+                }),
+                Some(v.to_string()),
+            );
+
+            assert_eq!(
+                pos.raw_idx(),
+                idx - 1,
+                "nibbles_to: parser indices mismatch"
+            );
+            is_at(cx, idx);
+        }
+
+        let chars = 'A'..='Z';
+        let tokens = {
+            let mut i = 0;
+            move || {
+                chars
+                    .clone()
+                    .nth(i)
+                    .inspect(|_| i += 1)
+                    .map(|c| TokenTree::from(Ident::new(&c.to_string(), Span::call_site())))
+            }
+        };
+        let tokens = TokenStream::from_iter(iter::from_fn(tokens));
+        let ref mut cx = Parser::new(tokens, Span::call_site());
+
+        nibbles_to(cx, 1, 'A');
+        nibbles_to(cx, 2, 'B');
+
+        let ckp = cx.save();
+        nibbles_to(cx, 3, 'C');
+        nibbles_to(cx, 4, 'D');
+        nibbles_to(cx, 5, 'E');
+
+        cx.gag(3);
+        nibbles_to(cx, 3, 'C');
+        nibbles_to(cx, 4, 'D');
+        nibbles_to(cx, 5, 'E');
+
+        cx.restore(&ckp);
+        nibbles_to(cx, 3, 'C');
+
+        is_at(cx, 3);
+
+        let exp = cx
+            .eat_expectantly(|_| <Option<()>>::None, Expected::nothing)
+            .unwrap_err();
+
+        println!("{exp:?}");
+
+        nibbles_to(cx, 5, 'E');
+        nibbles_to(cx, 6, 'F');
+
+        exp.recover(cx);
+        is_at(cx, 3);
+        nibbles_to(cx, 4, 'D');
+    }
     #[test]
     #[cfg(feature = "attributes")]
     fn attributes() {

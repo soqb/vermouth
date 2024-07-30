@@ -3,8 +3,8 @@
 use proc_macro::{Delimiter, Group, Punct, Spacing, Span, TokenStream, TokenTree};
 
 use crate::{
-    Diagnostic, Expected, Finish, Parse, Parser, Result, Spanned, ToSpan, ToTokens, TokenTreeExt,
-    TokensExtend,
+    Diagnostic, DiagnosticLevel, Expected, Finish, Parse, Parser, Result, Spanned, ToSpan,
+    ToTokens, TokenTreeExt, TokensExtend,
 };
 
 /// Represents the contents of an attribute which may be [`cfg`] or [`cfg_attr`].
@@ -93,7 +93,8 @@ impl<O, I> Attribute<O, I> {
     pub fn reject_inner(self) -> Result<O, Diagnostic> {
         match self {
             Attribute::Outer { contents } => Ok(contents),
-            Attribute::Inner { bang, .. } => Err(Diagnostic::custom_error(
+            Attribute::Inner { bang, .. } => Err(Diagnostic::custom(
+                DiagnosticLevel::Error,
                 bang.span(),
                 "inner attributes (such as `#![foo]`) are not permitted in this context",
             )),

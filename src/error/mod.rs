@@ -1,9 +1,18 @@
 use core::fmt;
 use std::{borrow::Cow, mem::replace};
 
-use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenStream, TokenTree};
+use proc_macro::{Span, TokenStream};
 
-use crate::{Parser, ParserPos, PosKind, ToSpan, TokensExtend};
+use crate::{Parser, ParserPos, ToSpan};
+
+#[cfg_attr(feature = "unstable-diagnostics-backend", path = "emit_unstable.rs")]
+mod emit;
+
+trait Emitter {
+    fn new() -> Self;
+    fn emit(&mut self, level: DiagnosticLevel, span: impl ToSpan, msg: &impl ToString);
+    fn finish(self) -> TokenStream;
+}
 
 /// An alias for the standard library [`Result`](core::result::Result).
 ///
@@ -12,15 +21,37 @@ pub type Result<T, E = Expected> = core::result::Result<T, E>;
 
 #[derive(Debug, PartialEq, Eq)]
 enum Syntax {
-    Literal(Cow<'static, str>),
-    Noun(Cow<'static, str>),
+    LiteralBox(Box<str>),
+    LiteralStr(&'static str),
+    NounBox(Box<str>),
+    NounStr(&'static str),
 }
 
 impl fmt::Display for Syntax {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Syntax::Literal(s) => write!(f, "`{s}`"),
-            Syntax::Noun(n) => f.write_str(n),
+            Syntax::LiteralBox(s) => write!(f, "`{s}`"),
+            Syntax::LiteralStr(s) => write!(f, "`{s}`"),
+            Syntax::NounBox(s) => f.write_str(s),
+            Syntax::NounStr(s) => f.write_str(s),
+        }
+    }
+}
+
+impl Syntax {
+    #[inline]
+    fn lit(lit: Cow<'static, str>) -> Self {
+        match lit {
+            Cow::Borrowed(s) => Self::LiteralStr(s),
+            Cow::Owned(s) => Self::LiteralBox(s.into_boxed_str()),
+        }
+    }
+
+    #[inline]
+    fn noun(noun: Cow<'static, str>) -> Self {
+        match noun {
+            Cow::Borrowed(s) => Self::NounStr(s),
+            Cow::Owned(s) => Self::NounBox(s.into_boxed_str()),
         }
     }
 }
@@ -37,6 +68,8 @@ pub struct Expected {
     // use `smallvec` because most of the time
     // there will only be 1 element.
     syntaxes: smallvec::SmallVec<[Syntax; 1]>,
+    // fixme: we could easily do something like `Option<Box<String>>`
+    // to save on stack space since `Expected` is already quite large.
     notes: Vec<Box<dyn DisplayDebug>>,
 }
 
@@ -101,11 +134,7 @@ impl Expected {
     /// ```
     #[inline]
     pub fn lit(pos: impl Into<ParserPos>, lit: impl Into<Cow<'static, str>>) -> Self {
-        Self {
-            pos: pos.into(),
-            syntaxes: smallvec::smallvec![Syntax::Literal(lit.into())],
-            notes: Vec::new(),
-        }
+        Self::nothing(pos).or_lit(lit)
     }
 
     /// Indicates the name of some syntax was expected.
@@ -122,11 +151,7 @@ impl Expected {
     /// ```
     #[inline]
     pub fn noun(pos: impl Into<ParserPos>, noun: impl Into<Cow<'static, str>>) -> Self {
-        Self {
-            pos: pos.into(),
-            syntaxes: smallvec::smallvec![Syntax::Noun(noun.into())],
-            notes: Vec::new(),
-        }
+        Self::nothing(pos).or_noun(noun)
     }
 
     /// Pushes a literal variant into this expectation.
@@ -145,7 +170,7 @@ impl Expected {
     /// ```
     #[inline]
     pub fn push_lit(&mut self, lit: impl Into<Cow<'static, str>>) {
-        self.syntaxes.push(Syntax::Literal(lit.into()));
+        self.syntaxes.push(Syntax::lit(lit.into()));
     }
 
     /// Pushes a named variant into this expectation.
@@ -164,7 +189,7 @@ impl Expected {
     /// ```
     #[inline]
     pub fn push_noun(&mut self, noun: impl Into<Cow<'static, str>>) {
-        self.syntaxes.push(Syntax::Noun(noun.into()));
+        self.syntaxes.push(Syntax::noun(noun.into()));
     }
 
     /// Combines this expectation with a literal variant.
@@ -203,7 +228,8 @@ impl Expected {
         self
     }
 
-    /// Restores the state of the parser to the [postion] just before the error was encountered.
+    /// Restores the state of the parser to the [position](ParserPos)
+    /// just before the error was encountered.
     ///
     /// Functionally parallel to [`Parser::restore`] and [`Parser::seek_to`].
     #[inline]
@@ -237,7 +263,7 @@ impl fmt::Display for Expected {
             }
             write!(f, "{last}")?;
 
-            if let PosKind::EndOfStream = self.pos.pos_kind {
+            if self.pos.is_eos() {
                 write!(f, ", but found the end of input")?;
             }
         } else {
@@ -256,9 +282,22 @@ trait DisplayDebug: fmt::Debug + fmt::Display {}
 impl<T: fmt::Debug + fmt::Display> DisplayDebug for T {}
 
 #[derive(Debug)]
+struct CustomDiagnostic {
+    level: DiagnosticLevel,
+    span: Span,
+    msg: Box<dyn DisplayDebug>,
+}
+
+impl PartialEq for CustomDiagnostic {
+    fn eq(&self, other: &Self) -> bool {
+        self.level == other.level
+    }
+}
+
+#[derive(Debug)]
 enum DiagnosticKind {
     Expected(Expected),
-    Custom(Span, Box<dyn DisplayDebug>),
+    Custom(CustomDiagnostic),
     Join(Vec<DiagnosticKind>),
 }
 
@@ -269,7 +308,7 @@ impl PartialEq for DiagnosticKind {
             (DiagnosticKind::Expected(a), DiagnosticKind::Expected(b)) => a == b,
             (DiagnosticKind::Join(a), DiagnosticKind::Join(b)) => a == b,
             // explicitly return false in this case, we don't have `PartialEq` for the dynamic error.
-            (DiagnosticKind::Custom(_, _), DiagnosticKind::Custom(_, _)) => false,
+            (DiagnosticKind::Custom(a), DiagnosticKind::Custom(b)) => a == b,
             _ => false,
         }
     }
@@ -277,28 +316,29 @@ impl PartialEq for DiagnosticKind {
 
 /// The universal type used for parsing diagnostics.
 ///
-/// The `Diagnostic` type contains one or more errors encountered during parsing.
+/// The `Diagnostic` type contains one or more errors, warnings,
+/// or other pieces of reportable information encountered during parsing.
 ///
 /// ## Construction
 ///
-/// Errors representing expected syntax elements can be constructed
-/// using the [`Expected`], and this types corresponding `From<Expected>` implementation.
+/// Diagnostic errors representing expected syntax elements can be constructed
+/// using the [`Expected`] type, and this type's corresponding `From<Expected>` implementation.
 /// See their docs for more information.
 ///
 /// ## Composition
 ///
-/// For several variants of expected, but not found syntax,
+/// For several variants of expected, but not found syntax over the same span,
 /// [`Expected`] can be composed with [`Expected::or_lit`] and [`Expected::or_noun`].
 ///
-/// Discrete errors can be combined into a single error value
-/// using [`Error::and`] and [`Error::and_many`].
+/// Discrete diagnostics can be combined into a single `Diagnostic` value
+/// using [`Diagnostic::and`] and [`Diagnostic::and_many`].
 ///
 /// ## Reporting
 ///
 /// **NB:** In stable Rust (as of version 1.80), there is no support for emitting diagnostics which are not compile errors.
 ///
-/// For use in `proc_macro`s, `Error` provides a [`ToTokens`] implementation,
-/// which compiles to an invocation of the [`compile_error`] macro.
+/// To emit the errors at runtime, `Diagnostic::emit` produces a `TokenStream`
+/// which compiles to a series of invocations of the [`compile_error`] macro.
 #[derive(Debug, PartialEq)]
 pub struct Diagnostic {
     kind: DiagnosticKind,
@@ -313,13 +353,21 @@ impl From<Expected> for Diagnostic {
     }
 }
 
-impl Diagnostic {
-    // pub fn from_expected_noun(span: impl ToSpan, name: impl Into<Cow<'static, str>>) -> Error {
-    //     Self {
-    //         kind: ErrorKind::Expected(span.span(), Syntax::Noun(name.into())),
-    //     }
-    // }
+/// The severity level of a [custom `Diagnostic`].
+///
+/// [custom `Diagnostic`]: Diagnostic::custom
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DiagnosticLevel {
+    /// An infallible compilation error.
+    Error,
+    /// A warning, which can be suppressed.
+    #[cfg(feature = "warnings")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "warnings")))]
+    Warning,
+}
 
+impl Diagnostic {
     /// Creates an error with a customizable message.
     ///
     /// # Reporting
@@ -327,12 +375,17 @@ impl Diagnostic {
     /// Errors creates with this constructor transparently report the message
     /// exactly as it is passed.
     #[inline]
-    pub fn custom_error(
+    pub fn custom(
+        level: DiagnosticLevel,
         span: impl ToSpan,
         msg: impl fmt::Display + fmt::Debug + 'static,
     ) -> Diagnostic {
         Self {
-            kind: DiagnosticKind::Custom(span.span(), Box::new(msg)),
+            kind: DiagnosticKind::Custom(CustomDiagnostic {
+                level,
+                span: span.span(),
+                msg: Box::new(msg),
+            }),
         }
     }
 
@@ -404,42 +457,17 @@ impl Diagnostic {
 }
 
 impl DiagnosticKind {
-    fn emit_and_extend_tokens(self, buf: &mut TokenStream) {
-        fn compile_err_call(buf: &mut TokenStream, span: Span, msg: &str) {
-            macro_rules! quote_path {
-                ($buf:ident <-) => {};
-                ($buf:ident <- :: $n:ident $(:: $r:ident)*) => {
-                    $buf.push(Punct::new(':', Spacing::Joint));
-                    $buf.push(Punct::new(':', Spacing::Alone));
-                    $buf.push(Ident::new(stringify!($n), span));
-
-                    // recurse
-                    quote_path!($buf <- $(:: $r)*)
-                };
-
-            }
-
-            quote_path!(buf <- ::core::compile_error);
-            buf.push(Punct::new('!', Spacing::Alone));
-
-            let msg: TokenTree = Literal::string(msg).into();
-            buf.push(Group::new(
-                Delimiter::Parenthesis,
-                TokenStream::from_iter([msg]),
-            ));
-            buf.push(Punct::new(';', Spacing::Alone));
-        }
-
+    fn emit(self, emitter: &mut impl Emitter) {
         match self {
             DiagnosticKind::Expected(exp) => {
-                compile_err_call(buf, exp.pos.span(), &exp.to_string())
+                emitter.emit(DiagnosticLevel::Error, exp.pos.span(), &exp.to_string())
             }
-            DiagnosticKind::Custom(span, custom_err) => {
-                compile_err_call(buf, span, &custom_err.to_string())
+            DiagnosticKind::Custom(custom) => {
+                emitter.emit(custom.level, custom.span, &custom.msg.to_string())
             }
             DiagnosticKind::Join(errors) => {
                 for err in errors {
-                    err.emit_and_extend_tokens(buf);
+                    err.emit(emitter);
                 }
             }
         }
@@ -447,14 +475,15 @@ impl DiagnosticKind {
 }
 
 impl Diagnostic {
-    #[inline]
-    pub(crate) fn emit_and_extend_tokens(self, buf: &mut TokenStream) {
-        self.kind.emit_and_extend_tokens(buf)
+    pub fn emit(self) -> TokenStream {
+        Self::emit_many(Some(self))
     }
 
-    pub fn emit(self) -> TokenStream {
-        let mut buf = TokenStream::new();
-        self.emit_and_extend_tokens(&mut buf);
-        buf
+    pub fn emit_many(ds: impl IntoIterator<Item = Self>) -> TokenStream {
+        let mut emitter = emit::EmitState::new();
+        for d in ds {
+            d.kind.emit(&mut emitter);
+        }
+        emitter.finish()
     }
 }

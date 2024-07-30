@@ -73,15 +73,15 @@ impl Pattern for Delimiter {
 
     fn eat(self, cx: &mut Parser) -> Result<Self::Output> {
         match cx.nibble() {
-            Some(TokenTree::Group(contents)) if contents.delimiter() == self => Ok(contents),
-            _ => {
+            (Some(TokenTree::Group(contents)), _) if contents.delimiter() == self => Ok(contents),
+            (_, pos) => {
                 let delim_str = match self {
                     Delimiter::Parenthesis => "parentheses",
                     Delimiter::Brace => "braces",
                     Delimiter::Bracket => "square brackets",
                     Delimiter::None => "implicit delimiters",
                 };
-                Err(Expected::noun(cx.digesting(), delim_str))
+                Err(Expected::noun(pos, delim_str))
             }
         }
     }
@@ -108,8 +108,9 @@ impl Pattern for Delimiter {
 ///
 /// macro_rules! expand_assert_makes_sense {
 ///     ($token:tt $($char:literal)*) => {
-///         let s = String::from_iter([ $($char),* ]);
-///         assert_eq!(stringify!($token), s);
+///         let chars: &[char] = &[ $($char),* ];
+///         let string = String::from_iter(chars);
+///         assert_eq!(stringify!($token), string);
 ///     }
 /// }
 ///

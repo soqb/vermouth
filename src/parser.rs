@@ -6,11 +6,95 @@ use crate::{Diagnostic, Expected, Pattern, Result, ToSpan, TokensExtend};
 ///
 pub struct Parser {
     seen: Vec<TokenTree>,
-    seen_ptr: usize,
+    seen_idx: SeenIdx,
     stream: proc_macro::token_stream::IntoIter,
     eos_span: Span,
     diag_buf: Vec<Diagnostic>,
 }
+
+mod indices {
+    use std::num::NonZero;
+
+    /// An index into the `seen` buffer in a `Parser`.
+    ///
+    /// Internally holds a `u32` which is one more than the index into the buffer.
+    ///
+    /// A value of `0` (i.e. a position guaranteed not to be in the buffer)
+    /// is a sentinel marking
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct SeenIdx {
+        // notably not `NonZero<u32>`.
+        // its not a soundness issue for the value to overflow and become 0,
+        // it just results in logic errors everywhere.
+        idx: u32,
+    }
+
+    impl SeenIdx {
+        pub const START: Self = Self::new_raw(1);
+        pub const ARBITRARY: Self = {
+            // any value is as good as any other
+            // but im listening to hamilton rn:
+            let value = 1776;
+            Self::new_raw(value)
+        };
+
+        #[inline]
+        pub const fn new_raw(idx: u32) -> Self {
+            SeenIdx { idx }
+        }
+
+        #[inline]
+        pub fn increment(&mut self) -> PosRepr {
+            let pos = PosRepr::from_idx(*self);
+            self.idx += 1;
+            pos
+        }
+
+        #[inline]
+        pub fn get(self) -> usize {
+            self.idx as usize - 1
+        }
+
+        #[inline]
+        pub fn seek_back(self, n: usize) -> Option<Self> {
+            let idx = self.idx as usize;
+            if n >= idx {
+                #[cold]
+                fn none() -> Option<SeenIdx> {
+                    None
+                }
+                return none();
+            }
+            let idx = idx as usize - n;
+            Some(Self { idx: idx as u32 })
+        }
+
+        #[inline]
+        pub fn from_pos(pos: PosRepr) -> Option<Self> {
+            pos.0.map(|idx| Self::new_raw(idx.get()))
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct PosRepr(Option<NonZero<u32>>);
+
+    impl PosRepr {
+        pub const EOS: Self = Self(None);
+
+        #[inline]
+        pub fn from_idx(idx: SeenIdx) -> Self {
+            Self(NonZero::new(idx.idx))
+        }
+
+        #[inline]
+        pub fn into_raw(self) -> usize {
+            self.0.map_or(0, NonZero::get) as usize - 1
+        }
+    }
+}
+
+use indices::{PosRepr, SeenIdx};
 
 /// A location in the stream of a [`Parser`].
 ///
@@ -23,7 +107,7 @@ pub struct Parser {
 #[derive(Clone, Debug)]
 #[must_use = "saving a `Checkpoint` is useless if it is never restored"]
 pub struct Checkpoint {
-    seen_ptr: usize,
+    seen_idx: SeenIdx,
     error_count: usize,
 }
 
@@ -45,14 +129,14 @@ impl Parser {
             stream: stream.into_iter(),
             eos_span: parent_span,
             seen: Vec::new(),
-            seen_ptr: 0,
+            seen_idx: SeenIdx::START,
             diag_buf: Vec::new(),
         }
     }
 
-    /// Inserts another [`Error`] into the parser's internal error buffer.
+    /// Inserts another [`Diagnostic`] into the parser's internal diagnostics buffer.
     ///
-    /// These errors can be retrieved with the [`Parser::compile_errors`] method.
+    /// These diagnostics can be emitted with the [`Parser::emit_diagnostics`] method.
     #[inline]
     pub fn report(&mut self, err: impl Into<Diagnostic>) {
         self.diag_buf.push(err.into());
@@ -60,7 +144,7 @@ impl Parser {
 
     /// If passed `Err`, [report it] and return `false`. Returns `true` otherwise.
     ///
-    /// These errors can be retrieved with the [`Parser::compile_errors`] method.
+    /// These diagnostics can be emitted with the [`Parser::emit_diagnostics`] method.
     ///
     /// [report it]: Parser::report
     #[inline]
@@ -74,14 +158,23 @@ impl Parser {
         }
     }
 
+    pub fn pos(&self) -> ParserPos {
+        ParserPos {
+            span: self.eos_span,
+            pos_data: PosRepr::from_idx(self.seen_idx),
+        }
+    }
+
     /// Consumes a token from the parser's internal stream.
     ///
     /// This is the most direct way of interacting with the parser stream.
     ///
-    /// Note that this method returns an `Option`, rather than a `Result`,
+    /// Note that the token is returned in an `Option`, rather than a `Result`,
     /// to ensure that errors are accurate and well-handled.
-    pub fn nibble(&mut self) -> Option<TokenTree> {
-        let opt = match self.seen.get(self.seen_ptr) {
+    /// The returned `ParserPos` is useful for creating `Expected` errors;
+    /// it represents the position in the stream just before the returned token.
+    pub fn nibble(&mut self) -> (Option<TokenTree>, ParserPos) {
+        let opt = match self.seen.get(self.seen_idx.get()) {
             Some(o) => Some(o.clone()),
             None => self
                 .stream
@@ -89,10 +182,22 @@ impl Parser {
                 .inspect(|tok| self.seen.push(tok.clone())),
         };
 
-        opt.inspect(|tok| {
-            self.eos_span = tok.span();
-            self.seen_ptr += 1;
-        })
+        let (opt, pos_data) = opt.map_or_else(
+            || (None, PosRepr::EOS),
+            |tt| {
+                self.eos_span = tt.span();
+                let idx = self.seen_idx.increment();
+                (Some(tt), idx)
+            },
+        );
+
+        (
+            opt,
+            ParserPos {
+                span: self.eos_span,
+                pos_data,
+            },
+        )
     }
 
     /// Parses a value from the parser's internal stream using a pattern for context.
@@ -133,14 +238,15 @@ impl Parser {
         pass_if: impl FnOnce(TokenTree) -> Option<T>,
         expects: impl FnOnce(ParserPos) -> Expected,
     ) -> Result<T, Expected> {
-        let pos;
-        match self.nibble() {
-            None => pos = self.here(),
-            Some(tok) => match pass_if(tok) {
-                None => pos = self.digesting(),
+        println!("{:?}", self.pos());
+
+        let pos = match self.nibble() {
+            (None, pos) => pos,
+            (Some(tt), pos) => match pass_if(tt) {
+                None => pos,
                 Some(res) => return Ok(res),
             },
-        }
+        };
 
         Err(expects(pos))
     }
@@ -193,32 +299,12 @@ impl Parser {
     /// If the parser is at the end of the stream,
     /// it returns a position with a `Span` covering the entire stream.
     pub fn here(&self) -> ParserPos {
-        let (span, pos_kind) = self.seen.get(self.seen_ptr).map_or_else(
-            || (self.eos_span, PosKind::EndOfStream),
-            |tt| (tt.span(), PosKind::InStream),
+        let (span, pos_data) = self.seen.get(self.seen_idx.get()).map_or_else(
+            || (self.eos_span, PosRepr::EOS),
+            |tt| (tt.span(), PosRepr::from_idx(self.seen_idx)),
         );
 
-        ParserPos {
-            pos_kind,
-            span,
-            seen_ptr: self.seen_ptr,
-        }
-    }
-
-    /// Returns the position of the just-parsed token in the parser stream.
-    ///
-    /// If are no previous tokens, a best-effort position
-    /// pointing to the start of the stream is returned.
-    pub fn digesting(&self) -> ParserPos {
-        let (span, seen_ptr) = (self.seen_ptr.checked_sub(1))
-            .and_then(|ptr| self.seen.get(ptr))
-            .map_or_else(|| (self.eos_span, 0), |tt| (tt.span(), self.seen_ptr - 1));
-
-        ParserPos {
-            pos_kind: PosKind::InStream,
-            span,
-            seen_ptr,
-        }
+        ParserPos { pos_data, span }
     }
 
     /// Saves the state of the parser to a [`Checkpoint`].
@@ -226,7 +312,7 @@ impl Parser {
     /// This state can be returned to by [`Parser::restore`].
     pub fn save(&self) -> Checkpoint {
         Checkpoint {
-            seen_ptr: self.seen_ptr,
+            seen_idx: self.seen_idx,
             error_count: self.diag_buf.len(),
         }
     }
@@ -256,7 +342,7 @@ impl Parser {
     /// [reported]: Parser::report
     pub fn restore(&mut self, point: &Checkpoint) -> ParserPos {
         let span = self.here();
-        self.seen_ptr = point.seen_ptr;
+        self.seen_idx = point.seen_idx;
         span
     }
 
@@ -270,8 +356,13 @@ impl Parser {
     /// # Reporting
     ///
     /// **NB:** This method has the same "unforgiving" effects on error reporting as [`Parser::restore`].
-    pub fn seek_to(&mut self, point: &ParserPos) {
-        self.seen_ptr = point.seen_ptr;
+    pub fn seek_to(&mut self, pos: &ParserPos) {
+        match SeenIdx::from_pos(pos.pos_data) {
+            Some(idx) => self.seen_idx = idx,
+            // doesn't really make sense,
+            // nor is it useful to seek to end-of-stream.
+            None => (),
+        }
     }
 
     /// Restores the state of the parser to a [previously saved](Parser::save) [`Checkpoint`].
@@ -301,11 +392,9 @@ impl Parser {
     ///
     /// **NB:** This method has the same "unforgiving" effects on error reporting as [`Parser::restore`].
     pub fn gag(&mut self, n: usize) {
-        let point = Checkpoint {
-            seen_ptr: self.seen_ptr - n,
-            error_count: self.diag_buf.len(),
-        };
-        let _ = self.restore(&point);
+        self.seen_idx = self.seen_idx.seek_back(n).unwrap_or_else(|| {
+            panic!("tried to `Parser::gag` to before the beginning of the parser's stream")
+        });
     }
 
     /// Returns all compile errors [reported] during parsing and emits all diagnostics.
@@ -314,7 +403,7 @@ impl Parser {
     pub fn emit_diagnostics(&mut self) -> TokenStream {
         let mut buf = TokenStream::new();
         for error in self.diag_buf.drain(..) {
-            error.emit_and_extend_tokens(&mut buf);
+            buf.extend(error.emit());
         }
         buf
     }
@@ -330,22 +419,27 @@ impl Parser {
         eos_behavior: impl FnOnce(ParserPos) -> Result<()>,
     ) -> Result<TokenStream> {
         let mut buf = TokenStream::new();
-        while let Some(tok) = self.nibble() {
-            if stop_condition(&tok) {
-                match stop_behavior(&tok)? {
-                    Finish::Eat => buf.push(tok),
-                    Finish::Gag => {
-                        self.gag(1);
+        loop {
+            match self.nibble() {
+                (Some(tok), _) => {
+                    if stop_condition(&tok) {
+                        match stop_behavior(&tok)? {
+                            Finish::Eat => buf.push(tok),
+                            Finish::Gag => {
+                                self.gag(1);
+                            }
+                            Finish::Void => (),
+                        }
+                        return Ok(buf);
                     }
-                    Finish::Void => (),
+
+                    buf.push(tok);
                 }
-                return Ok(buf);
+                (None, pos) => {
+                    return eos_behavior(pos).map(|_| buf);
+                }
             }
-
-            buf.push(tok);
         }
-
-        eos_behavior(self.here()).map(|_| buf)
     }
 
     /// Returns the remaining contents of the parser's stream, as a [`TokenStream`].
@@ -354,20 +448,13 @@ impl Parser {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum PosKind {
-    InStream,
-    EndOfStream,
-}
-
 /// A reference to a position within the internal stream of a [`Parser`].
 ///
 /// This is primarily useful for error reporting and parser recovery.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct ParserPos {
-    pub(crate) pos_kind: PosKind,
     span: Span,
-    seen_ptr: usize,
+    pos_data: PosRepr,
 }
 
 impl ToSpan for ParserPos {
@@ -379,16 +466,28 @@ impl ToSpan for ParserPos {
 impl ParserPos {
     /// Creates an arbitrary [`ParserPos`] value for use in testing and documentation.
     ///
-    /// While this method is allowed to produce absurd or illogical values,
+    /// Values returned from this method should never be used for modifying a `Parser`.
+    ///
+    /// While this method is allowed to produce absurd or illogical results,
     /// it is never unsafe to call.
     pub fn arbitrary() -> Self {
         Self {
             // NB: this value affects error messages,
             // so should stay constant.
-            pos_kind: PosKind::InStream,
+            pos_data: PosRepr::from_idx(SeenIdx::ARBITRARY),
             span: Span::call_site(),
-            seen_ptr: 0,
         }
+    }
+
+    /// Returns whether this [`ParserPos`] is the position at the end of the stream,
+    /// after the last token.
+    pub fn is_eos(self) -> bool {
+        self.pos_data == PosRepr::EOS
+    }
+
+    #[cfg(test)]
+    pub(crate) fn raw_idx(self) -> usize {
+        self.pos_data.into_raw()
     }
 }
 

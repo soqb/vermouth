@@ -20,7 +20,15 @@ optional = true
 default = ["attributes"]
 proc-macro2 = ["dep:proc-macro2"]
 attributes = []
+warnings = []
+
+unstable-diagnostics-backend = []
+
+stable-complete = ["attributes", "warnings"]
 
 # enable this in your r-a config
 # please, please, please do not enable this during compilation.
 rust-analyzer-hack = []
+
+[package.metadata.docs.rs]
+features = ["stable-complete"]
