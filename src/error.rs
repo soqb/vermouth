@@ -3,7 +3,7 @@ use std::{borrow::Cow, mem::replace};
 
 use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenStream, TokenTree};
 
-use crate::{ToSpan, ToTokens, TokensExtend};
+use crate::{Parser, ParserPos, SpanKind, ToSpan, ToTokens, TokensExtend};
 
 /// An alias for the standard library [`Result`](core::result::Result).
 ///
@@ -33,13 +33,19 @@ impl fmt::Display for Syntax {
 /// [`Expected::push_lit`] and [`Expected::push_noun`].
 #[derive(Debug)]
 pub struct Expected {
-    span: Span,
+    pos: ParserPos,
     syntaxes: Vec<Syntax>,
+}
+
+impl From<Expected> for ParserPos {
+    fn from(value: Expected) -> Self {
+        value.pos
+    }
 }
 
 impl ToSpan for Expected {
     fn span(&self) -> Span {
-        self.span
+        self.pos.span
     }
 }
 
@@ -61,17 +67,16 @@ impl Expected {
     ///
     /// ```
     /// # vermouth::ඞ_declare_test!();
-    /// # use proc_macro::Span;
     /// # use vermouth::Expected;
     /// #
-    /// # let span = Span::call_site();
-    /// let error = Expected::nothing(span);
+    /// # let parser_pos = vermouth::ParserPos::arbitrary();
+    /// let error = Expected::nothing(parser_pos);
     /// assert_eq!(error.to_string(), "expected no tokens");
     /// ```
     #[inline]
-    pub fn nothing(span: impl ToSpan) -> Self {
+    pub fn nothing(pos: impl Into<ParserPos>) -> Self {
         Self {
-            span: span.span(),
+            pos: pos.into(),
             syntaxes: vec![],
         }
     }
@@ -82,17 +87,16 @@ impl Expected {
     ///
     /// ```
     /// # vermouth::ඞ_declare_test!();
-    /// # use proc_macro::Span;
     /// # use vermouth::Expected;
     /// #
-    /// # let span = Span::call_site();
-    /// let error = Expected::lit(span, "foo");
+    /// # let parser_pos = vermouth::ParserPos::arbitrary();
+    /// let error = Expected::lit(parser_pos, "foo");
     /// assert_eq!(error.to_string(), "expected `foo`");
     /// ```
     #[inline]
-    pub fn lit(span: impl ToSpan, lit: impl Into<Cow<'static, str>>) -> Self {
+    pub fn lit(pos: impl Into<ParserPos>, lit: impl Into<Cow<'static, str>>) -> Self {
         Self {
-            span: span.span(),
+            pos: pos.into(),
             syntaxes: vec![Syntax::Literal(lit.into())],
         }
     }
@@ -103,17 +107,16 @@ impl Expected {
     ///
     /// ```
     /// # vermouth::ඞ_declare_test!();
-    /// # use proc_macro::Span;
     /// # use vermouth::Expected;
     /// #
-    /// # let span = Span::call_site();
-    /// let error = Expected::noun(span, "a bar");
+    /// # let parser_pos = vermouth::ParserPos::arbitrary();
+    /// let error = Expected::noun(parser_pos, "a bar");
     /// assert_eq!(error.to_string(), "expected a bar");
     /// ```
     #[inline]
-    pub fn noun(span: impl ToSpan, noun: impl Into<Cow<'static, str>>) -> Self {
+    pub fn noun(pos: impl Into<ParserPos>, noun: impl Into<Cow<'static, str>>) -> Self {
         Self {
-            span: span.span(),
+            pos: pos.into(),
             syntaxes: vec![Syntax::Noun(noun.into())],
         }
     }
@@ -124,11 +127,10 @@ impl Expected {
     ///
     /// ```
     /// # vermouth::ඞ_declare_test!();
-    /// # use proc_macro::Span;
     /// # use vermouth::Expected;
     /// #
-    /// # let span = Span::call_site();
-    /// let mut error = Expected::lit(span, "foo");
+    /// # let parser_pos = vermouth::ParserPos::arbitrary();
+    /// let mut error = Expected::lit(parser_pos, "foo");
     /// error.push_lit("bar");
     /// error.push_lit("baz");
     /// assert_eq!(error.to_string(), "expected `foo`, `bar`, or `baz`");
@@ -144,11 +146,10 @@ impl Expected {
     ///
     /// ```
     /// # vermouth::ඞ_declare_test!();
-    /// # use proc_macro::Span;
     /// # use vermouth::Expected;
     /// #
-    /// # let span = Span::call_site();
-    /// let mut error = Expected::noun(span, "some foo");
+    /// # let parser_pos = vermouth::ParserPos::arbitrary();
+    /// let mut error = Expected::noun(parser_pos, "some foo");
     /// error.push_noun("any kind of bar");
     /// error.push_noun("a baz");
     /// assert_eq!(error.to_string(), "expected some foo, any kind of bar, or a baz");
@@ -164,11 +165,10 @@ impl Expected {
     ///
     /// ```
     /// # vermouth::ඞ_declare_test!();
-    /// # use proc_macro::Span;
     /// # use vermouth::Expected;
     /// #
-    /// # let span = Span::call_site();
-    /// let error = Expected::nothing(span).or_lit("foo").or_noun("any bar");
+    /// # let parser_pos = vermouth::ParserPos::arbitrary();
+    /// let error = Expected::nothing(parser_pos).or_lit("foo").or_noun("any bar");
     /// assert_eq!(error.to_string(), "expected `foo`, or any bar");
     /// ```
     #[inline]
@@ -183,17 +183,20 @@ impl Expected {
     ///
     /// ```
     /// # vermouth::ඞ_declare_test!();
-    /// # use proc_macro::Span;
     /// # use vermouth::Expected;
     /// #
-    /// # let span = Span::call_site();
-    /// let error = Expected::nothing(span).or_noun("some foo").or_lit("bar");
+    /// # let parser_pos = vermouth::ParserPos::arbitrary();
+    /// let error = Expected::nothing(parser_pos).or_noun("some foo").or_lit("bar");
     /// assert_eq!(error.to_string(), "expected some foo, or `bar`");
     /// ```
     #[inline]
     pub fn or_noun(mut self, noun: impl Into<Cow<'static, str>>) -> Self {
         self.push_noun(noun);
         self
+    }
+
+    pub fn restore(&self, cx: &mut Parser) {
+        self.pos.restore(cx)
     }
 }
 
@@ -211,7 +214,13 @@ impl fmt::Display for Expected {
         if self.syntaxes.len() > 1 {
             write!(f, "or ")?;
         }
-        write!(f, "{last}")
+        write!(f, "{last}")?;
+
+        if let SpanKind::EndOfStream = self.pos.span_kind {
+            write!(f, ", but found the end of input")?;
+        }
+
+        Ok(())
     }
 }
 
@@ -389,9 +398,7 @@ impl ToTokens for ErrorKind {
         }
 
         match &self {
-            ErrorKind::Expected(syntax) => {
-                compile_err_call(buf, syntax.span, &format!("expected {syntax}"))
-            }
+            ErrorKind::Expected(exp) => compile_err_call(buf, exp.pos.span, &exp.to_string()),
             ErrorKind::Custom(span, custom_err) => {
                 compile_err_call(buf, *span, &custom_err.to_string())
             }

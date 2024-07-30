@@ -1,6 +1,6 @@
 use proc_macro::{Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
-use crate::{Error, Expected, Pattern, Result, ToSpan, ToTokens, TokensExtend};
+use crate::{Error, Expected, Pattern, Result, ToTokens, TokensExtend};
 
 /// A simple parser for Rust source which traverses [`TokenTree`]s.
 ///
@@ -16,11 +16,11 @@ pub struct Parser {
 ///
 /// This is can be used for backtracking after encountering an error.
 /// This type can be a burden in simple cases;
-/// consider [`Parser::gag`] when this becomes the case.
+/// consider [`Parser::gag`] when this is the case.
 ///
 /// Created exclusively with [`Parser::save`] and
 /// consumed exclusively by [`Parser::restore`].
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[must_use = "saving a `Checkpoint` is useless if it is never restored"]
 pub struct Checkpoint {
     seen_ptr: usize,
@@ -131,18 +131,18 @@ impl Parser {
     pub fn eat_expectantly<T>(
         &mut self,
         pass_if: impl FnOnce(TokenTree) -> Option<T>,
-        expects: impl FnOnce(Span) -> Expected,
+        expects: impl FnOnce(ParserPos) -> Expected,
     ) -> Result<T, Expected> {
-        let span;
+        let pos;
         match self.nibble() {
-            None => span = self.here(),
+            None => pos = self.here(),
             Some(tok) => match pass_if(tok) {
-                None => span = self.gag(1),
+                None => pos = self.digesting(),
                 Some(res) => return Ok(res),
             },
         }
 
-        Err(expects(span))
+        Err(expects(pos))
     }
 
     /// Returns the next token in the parser stream, if it is an [`Ident`].
@@ -191,19 +191,44 @@ impl Parser {
     /// Returns the position of the parser within a stream of tokens, as a [`Span`].
     ///
     /// If the parser is at the end of the stream, it returns a `Span` covering the entire stream.
-    pub fn here(&self) -> Span {
-        self.seen
-            .get(self.seen_ptr)
-            .map_or(self.eos_span, ToSpan::span)
+    pub fn here(&self) -> ParserPos {
+        let (span, span_kind) = self.seen.get(self.seen_ptr).map_or_else(
+            || (self.eos_span, SpanKind::EndOfStream),
+            |tt| (tt.span(), SpanKind::InStream),
+        );
+
+        ParserPos {
+            span_kind,
+            span,
+            checkpoint: self.save(),
+        }
+    }
+
+    /// Returns the position of the just-parsed token in the parser stream.
+    ///
+    /// If are no previous tokens, a best-effort position
+    /// pointing to the start of the stream is returned.
+    pub fn digesting(&self) -> ParserPos {
+        let (span, seen_ptr) = (self.seen_ptr.checked_sub(1))
+            .and_then(|ptr| self.seen.get(ptr))
+            .map_or_else(|| (self.eos_span, 0), |tt| (tt.span(), self.seen_ptr - 1));
+
+        ParserPos {
+            span_kind: SpanKind::InStream,
+            span,
+            checkpoint: Checkpoint {
+                seen_ptr,
+                error_count: self.error_buf.len(),
+            },
+        }
     }
 
     /// Saves the state of the parser to a [`Checkpoint`].
     ///
     /// This state can be returned to by [`Parser::restore`].
     pub fn save(&self) -> Checkpoint {
-        let seen_ptr = self.seen_ptr;
         Checkpoint {
-            seen_ptr,
+            seen_ptr: self.seen_ptr,
             error_count: self.error_buf.len(),
         }
     }
@@ -225,10 +250,10 @@ impl Parser {
     /// (as opposed to being returned in a `Result::Err`)
     /// are typically important enough to warrant not omitting retroactively.
     ///
-    /// If the converse behavior is required see [`Parser::restore_forgiving`].
+    /// If the converse behavior is required, see [`Parser::restore_forgiving`].
     ///
     /// [reported]: Parser::report
-    pub fn restore(&mut self, point: Checkpoint) -> Span {
+    pub fn restore(&mut self, point: &Checkpoint) -> ParserPos {
         let span = self.here();
         self.seen_ptr = point.seen_ptr;
         span
@@ -241,7 +266,7 @@ impl Parser {
     /// # Reporting
     ///
     /// See [`Parser::restore`] for more details and what makes this method "forgiving".
-    pub fn restore_forgiving(&mut self, point: Checkpoint) -> Span {
+    pub fn restore_forgiving(&mut self, point: &Checkpoint) -> ParserPos {
         self.error_buf
             .drain(point.error_count..self.error_buf.len());
         self.restore(point)
@@ -254,12 +279,12 @@ impl Parser {
     /// # Reporting
     ///
     /// **NB:** This method has the same "unforgiving" effects on error reporting as [`Parser::restore`].
-    pub fn gag(&mut self, n: usize) -> Span {
-        let ck = Checkpoint {
+    pub fn gag(&mut self, n: usize) {
+        let point = Checkpoint {
             seen_ptr: self.seen_ptr - n,
             error_count: self.error_buf.len(),
         };
-        self.restore(ck)
+        self.restore(&point);
     }
 
     /// Returns all compile errors [reported] during parsing.
@@ -272,9 +297,7 @@ impl Parser {
         }
         buf
     }
-}
 
-impl Parser {
     /// Collects all tokens until a condition is met.
     ///
     /// The behavior of the final token is specified by [`Finish`],
@@ -283,7 +306,7 @@ impl Parser {
         &mut self,
         mut stop_condition: impl FnMut(&TokenTree) -> bool,
         stop_behavior: impl FnOnce(&TokenTree) -> Result<Finish>,
-        eos_behavior: impl FnOnce(Span) -> Result<()>,
+        eos_behavior: impl FnOnce(ParserPos) -> Result<()>,
     ) -> Result<TokenStream> {
         let mut buf = TokenStream::new();
         while let Some(tok) = self.nibble() {
@@ -301,12 +324,48 @@ impl Parser {
             buf.push(tok);
         }
 
-        eos_behavior(self.eos_span).map(|_| buf)
+        eos_behavior(self.here()).map(|_| buf)
     }
 
     /// Returns the remaining contents of the parser's stream, as a [`TokenStream`].
     pub fn rest(&mut self) -> TokenStream {
         self.stream.by_ref().collect()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum SpanKind {
+    InStream,
+    EndOfStream,
+}
+
+#[derive(Debug)]
+pub struct ParserPos {
+    pub(crate) span_kind: SpanKind,
+    pub(crate) span: Span,
+    pub(crate) checkpoint: Checkpoint,
+}
+
+impl ParserPos {
+    /// Creates an arbitrary [`ParserPos`] value for use in testing and documentation.
+    ///
+    /// While this method is allowed to produce absurd or illogical values,
+    /// it is never unsafe to call.
+    pub fn arbitrary() -> Self {
+        Self {
+            // NB: this value affects error messages,
+            // so should stay constant.
+            span_kind: SpanKind::InStream,
+            span: Span::call_site(),
+            checkpoint: Checkpoint {
+                seen_ptr: 0,
+                error_count: 0,
+            },
+        }
+    }
+
+    pub fn restore(&self, cx: &mut Parser) {
+        cx.restore(&self.checkpoint);
     }
 }
 

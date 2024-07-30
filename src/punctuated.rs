@@ -69,6 +69,7 @@ impl<T, S> Punctuated<T, S> {
         }
     }
 
+    /// Pops the trailing separator in this list, if there is any.
     pub fn pop_sep(&mut self) -> Option<S> {
         if self.trailing.is_none() {
             let Some((value, sep)) = self.pairs.pop() else {

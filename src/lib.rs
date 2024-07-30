@@ -1,8 +1,8 @@
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/soqb/vermouth/trunk/assets/logo-square.png"
+    html_logo_url = "https://raw.githubusercontent.com/soqb/vermouth/trunk/assets/logo-small.png"
 )]
 #![doc(
-    html_favicon_url = "https://raw.githubusercontent.com/soqb/vermouth/trunk/assets/logo-small.png"
+    html_favicon_url = "https://raw.githubusercontent.com/soqb/vermouth/trunk/assets/logo-icon.png"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(clippy::toplevel_ref_arg)]
@@ -53,8 +53,8 @@ mod span;
 
 pub use self::{error::*, ext::*, parser::*, pat::*, span::*};
 
-#[cfg_attr(docsrs, doc(cfg(feature = "attributes")))]
 #[cfg(feature = "attributes")]
+#[cfg_attr(docsrs, doc(cfg(feature = "attributes")))]
 pub mod attributes;
 pub mod path;
 pub mod punctuated;
@@ -63,7 +63,9 @@ pub mod punctuated;
 mod tests {
     use proc_macro::{Span, TokenTree};
 
-    use crate::{attributes::Attribute, punct_pat, Expected, Parse, Parser, Result, Spanned};
+    use crate::{
+        attributes::Attribute, punct_pat, Expected, Parse, Parser, ParserPos, Result, Spanned,
+    };
 
     ඞ_declare_test!();
 
@@ -151,7 +153,7 @@ mod tests {
 
     #[test]
     fn error_reporting() {
-        let exp = Expected::nothing(Span::call_site())
+        let exp = Expected::nothing(ParserPos::arbitrary())
             .or_lit("foo")
             .or_noun("a bar")
             .or_lit("baz");
@@ -175,7 +177,7 @@ mod tests {
                         TokenTree::Ident(id) if id.to_string() == "foo" => Some(Foo),
                         _ => None,
                     },
-                    |span| Expected::lit(span, "foo"),
+                    |pos| Expected::lit(pos, "foo"),
                 )
             }
         }
@@ -188,7 +190,7 @@ mod tests {
                         TokenTree::Ident(id) if id.to_string() == "bar" => Some(Bar),
                         _ => None,
                     },
-                    |span| Expected::lit(span, "bar"),
+                    |pos| Expected::lit(pos, "bar"),
                 )
             }
         }

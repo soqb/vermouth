@@ -1,4 +1,4 @@
-![graffiti-style vermouth logo](assets/logo-square.png)
+![graffiti-style vermouth logo](assets/logo-small.png)
 
 # `vermouth` — a new kind of parser for procedural macros.
 

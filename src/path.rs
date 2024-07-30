@@ -35,6 +35,9 @@ impl ToTokens for PathSep {
     }
 }
 
+/// Parses a [simple path]
+///
+/// [simple path]: https://doc.rust-lang.org/reference/paths.html#simple-paths
 pub fn parse_simple_path(cx: &mut Parser) -> Result<Punctuated<Ident, PathSep>> {
     let mut p = Punctuated::new();
     if let Ok(sep) = cx.parse() {

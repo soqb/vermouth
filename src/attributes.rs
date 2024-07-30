@@ -55,7 +55,7 @@ where
             let meta = cx.collect_until(
                 |tok| tok.is_punct(','),
                 |_| Ok(Finish::Void),
-                |span| Err(Expected::lit(span, ",").into()),
+                |pos| Err(Expected::lit(pos, ",").into()),
             )?;
             let inner = Self::parse_with(cx, args)?;
 
@@ -109,7 +109,7 @@ impl<O, I> Attribute<O, I> {
     ) -> Result<Attribute<O, I>> {
         cx.eat_expectantly(
             |tok| tok.is_punct('#').then_some(()),
-            |span| Expected::lit(span, "an attribute"),
+            |pos| Expected::lit(pos, "an attribute"),
         )?;
 
         enum Kind {
@@ -123,7 +123,7 @@ impl<O, I> Attribute<O, I> {
                 TokenTree::Punct(punct) if punct.as_char() == '!' => Some(Kind::Inner(punct)),
                 _ => None,
             },
-            |span| Expected::lit(span, "!").or_noun("square brackets"),
+            |pos| Expected::lit(pos, "!").or_noun("square brackets"),
         )?;
 
         if let Kind::Outer = &kind {

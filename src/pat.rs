@@ -2,7 +2,7 @@ use proc_macro::{Delimiter, Group, Punct, Spacing, TokenTree};
 
 use crate::{Expected, Parser, Result};
 
-/// Performs simple pattern matching on a [`Parser`] stream.
+/// Performs simple pattern-matched parsing through a [`Parser`] object.
 ///
 /// Often, this trait is interfaced through the `Parser` type itself
 /// with [`Parser::eat`].
@@ -64,6 +64,7 @@ use crate::{Expected, Parser, Result};
 pub trait Pattern {
     type Output;
 
+    /// Uses the arguments stored in `self` to parse a value from a [`Parser`].
     fn eat(self, cx: &mut Parser) -> Result<Self::Output>;
 }
 
@@ -80,7 +81,7 @@ impl Pattern for Delimiter {
                     Delimiter::Bracket => "square brackets",
                     Delimiter::None => "implicit delimiters",
                 };
-                Err(Expected::noun(cx.gag(1), delim_str))
+                Err(Expected::noun(cx.digesting(), delim_str))
             }
         }
     }
@@ -298,7 +299,7 @@ macro_rules! ඞ_punct_pat_def {
 /// # ]);
 /// # let ref mut cx = Parser::new(stream, Span::call_site());
 /// assert_eq!(
-///     cx.eat(punct_pat!(..=)),
+///     cx.eat(punct_pat!(..=)).map(drop),
 ///     Ok(()),
 /// );
 /// ```

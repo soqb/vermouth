@@ -48,19 +48,15 @@ impl<T> ToSpan for Spanned<T> {
 /// # vermouth::ඞ_declare_test!();
 /// #
 /// use proc_macro::{Ident, Span};
-/// use vermouth::{Spanned, Result, Expected, ToSpan};
+/// use vermouth::{Spanned, Expected, ToSpan};
 ///
-/// fn is_continue_kw(kw: Spanned<&str>) -> Result<()> {
-///     if &**kw == "continue" {
-///         Ok(())
-///     } else {
-///         Err(Expected::lit(kw.span(), "continue"))
-///     }
+/// fn is_continue_kw(kw: Spanned<&str>) -> bool {
+///     kw == "continue"
 /// }
 ///
-/// let ident: Ident = Ident::new("continue", Span::call_site());
+/// let ident = Ident::new("continue", Span::call_site());
 /// let spanned: Spanned<String> = ident.into();
-/// assert_eq!(is_continue_kw(spanned.as_deref()), Ok(()));
+/// assert!(is_continue_kw(spanned.as_deref()));
 /// ```
 pub struct Spanned<T> {
     inner: T,

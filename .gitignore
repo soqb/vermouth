@@ -1,1 +1,3 @@
 /target
+# useful for avoiding checking in krita metadata
+**/*~
