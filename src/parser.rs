@@ -1,6 +1,6 @@
 use proc_macro::{Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
-use crate::{Error, Expected, Pattern, Result, ToSpan, ToTokens, TokensExtend};
+use crate::{Diagnostic, Expected, Pattern, Result, ToSpan, TokensExtend};
 
 /// A simple parser for Rust source which traverses [`TokenTree`]s.
 ///
@@ -9,7 +9,7 @@ pub struct Parser {
     seen_ptr: usize,
     stream: proc_macro::token_stream::IntoIter,
     eos_span: Span,
-    error_buf: Vec<Error>,
+    diag_buf: Vec<Diagnostic>,
 }
 
 /// A location in the stream of a [`Parser`].
@@ -46,7 +46,7 @@ impl Parser {
             eos_span: parent_span,
             seen: Vec::new(),
             seen_ptr: 0,
-            error_buf: Vec::new(),
+            diag_buf: Vec::new(),
         }
     }
 
@@ -54,8 +54,8 @@ impl Parser {
     ///
     /// These errors can be retrieved with the [`Parser::compile_errors`] method.
     #[inline]
-    pub fn report(&mut self, err: impl Into<Error>) {
-        self.error_buf.push(err.into());
+    pub fn report(&mut self, err: impl Into<Diagnostic>) {
+        self.diag_buf.push(err.into());
     }
 
     /// If passed `Err`, [report it] and return `false`. Returns `true` otherwise.
@@ -64,7 +64,7 @@ impl Parser {
     ///
     /// [report it]: Parser::report
     #[inline]
-    pub fn try_report(&mut self, res: Result<(), impl Into<Error>>) -> bool {
+    pub fn try_report(&mut self, res: Result<(), impl Into<Diagnostic>>) -> bool {
         match res {
             Ok(()) => true,
             Err(err) => {
@@ -188,19 +188,20 @@ impl Parser {
         )
     }
 
-    /// Returns the position of the parser within a stream of tokens, as a [`Span`].
+    /// Returns the position of the parser within a stream of tokens, as a [`ParserPos`].
     ///
-    /// If the parser is at the end of the stream, it returns a `Span` covering the entire stream.
+    /// If the parser is at the end of the stream,
+    /// it returns a position with a `Span` covering the entire stream.
     pub fn here(&self) -> ParserPos {
-        let (span, span_kind) = self.seen.get(self.seen_ptr).map_or_else(
+        let (span, pos_kind) = self.seen.get(self.seen_ptr).map_or_else(
             || (self.eos_span, PosKind::EndOfStream),
             |tt| (tt.span(), PosKind::InStream),
         );
 
         ParserPos {
-            pos_kind: span_kind,
+            pos_kind,
             span,
-            checkpoint: self.save(),
+            seen_ptr: self.seen_ptr,
         }
     }
 
@@ -216,10 +217,7 @@ impl Parser {
         ParserPos {
             pos_kind: PosKind::InStream,
             span,
-            checkpoint: Checkpoint {
-                seen_ptr,
-                error_count: self.error_buf.len(),
-            },
+            seen_ptr,
         }
     }
 
@@ -229,7 +227,7 @@ impl Parser {
     pub fn save(&self) -> Checkpoint {
         Checkpoint {
             seen_ptr: self.seen_ptr,
-            error_count: self.error_buf.len(),
+            error_count: self.diag_buf.len(),
         }
     }
 
@@ -258,12 +256,8 @@ impl Parser {
     /// [reported]: Parser::report
     pub fn restore(&mut self, point: &Checkpoint) -> ParserPos {
         let span = self.here();
-        self.restore_impl(point);
-        span
-    }
-
-    fn restore_impl(&mut self, point: &Checkpoint) {
         self.seen_ptr = point.seen_ptr;
+        span
     }
 
     /// Restores the state of a parser to a previous [position](ParserPos).
@@ -277,7 +271,7 @@ impl Parser {
     ///
     /// **NB:** This method has the same "unforgiving" effects on error reporting as [`Parser::restore`].
     pub fn seek_to(&mut self, point: &ParserPos) {
-        self.restore_impl(&point.checkpoint);
+        self.seen_ptr = point.seen_ptr;
     }
 
     /// Restores the state of the parser to a [previously saved](Parser::save) [`Checkpoint`].
@@ -291,8 +285,7 @@ impl Parser {
     ///
     /// See [`Parser::restore`] for more details and what makes this method "forgiving".
     pub fn restore_forgiving(&mut self, point: &Checkpoint) -> ParserPos {
-        self.error_buf
-            .drain(point.error_count..self.error_buf.len());
+        self.diag_buf.drain(point.error_count..self.diag_buf.len());
         self.restore(point)
     }
 
@@ -310,18 +303,18 @@ impl Parser {
     pub fn gag(&mut self, n: usize) {
         let point = Checkpoint {
             seen_ptr: self.seen_ptr - n,
-            error_count: self.error_buf.len(),
+            error_count: self.diag_buf.len(),
         };
         let _ = self.restore(&point);
     }
 
-    /// Returns all compile errors [reported] during parsing.
+    /// Returns all compile errors [reported] during parsing and emits all diagnostics.
     ///
     /// [reported]: Parser::report
-    pub fn compile_errors(&self) -> TokenStream {
+    pub fn emit_diagnostics(&mut self) -> TokenStream {
         let mut buf = TokenStream::new();
-        for error in &self.error_buf {
-            error.extend_tokens(&mut buf);
+        for error in self.diag_buf.drain(..) {
+            error.emit_and_extend_tokens(&mut buf);
         }
         buf
     }
@@ -374,7 +367,7 @@ pub(crate) enum PosKind {
 pub struct ParserPos {
     pub(crate) pos_kind: PosKind,
     span: Span,
-    checkpoint: Checkpoint,
+    seen_ptr: usize,
 }
 
 impl ToSpan for ParserPos {
@@ -394,10 +387,7 @@ impl ParserPos {
             // so should stay constant.
             pos_kind: PosKind::InStream,
             span: Span::call_site(),
-            checkpoint: Checkpoint {
-                seen_ptr: 0,
-                error_count: 0,
-            },
+            seen_ptr: 0,
         }
     }
 }

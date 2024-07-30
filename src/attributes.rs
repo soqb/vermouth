@@ -3,7 +3,7 @@
 use proc_macro::{Delimiter, Group, Punct, Spacing, Span, TokenStream, TokenTree};
 
 use crate::{
-    Error, Expected, Finish, Parse, Parser, Result, Spanned, ToSpan, ToTokens, TokenTreeExt,
+    Diagnostic, Expected, Finish, Parse, Parser, Result, Spanned, ToSpan, ToTokens, TokenTreeExt,
     TokensExtend,
 };
 
@@ -90,10 +90,10 @@ pub enum Attribute<O, I> {
 
 impl<O, I> Attribute<O, I> {
     /// Unwraps outer attributes and errors on inner attributes.
-    pub fn reject_inner(self) -> Result<O, Error> {
+    pub fn reject_inner(self) -> Result<O, Diagnostic> {
         match self {
             Attribute::Outer { contents } => Ok(contents),
-            Attribute::Inner { bang, .. } => Err(Error::custom(
+            Attribute::Inner { bang, .. } => Err(Diagnostic::custom_error(
                 bang.span(),
                 "inner attributes (such as `#![foo]`) are not permitted in this context",
             )),
