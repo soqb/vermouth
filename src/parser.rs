@@ -1,6 +1,6 @@
 use proc_macro::{Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
-use crate::{Error, Expected, Pattern, Result, ToTokens, TokensExtend};
+use crate::{Error, Expected, Pattern, Result, ToSpan, ToTokens, TokensExtend};
 
 /// A simple parser for Rust source which traverses [`TokenTree`]s.
 ///
@@ -193,12 +193,12 @@ impl Parser {
     /// If the parser is at the end of the stream, it returns a `Span` covering the entire stream.
     pub fn here(&self) -> ParserPos {
         let (span, span_kind) = self.seen.get(self.seen_ptr).map_or_else(
-            || (self.eos_span, SpanKind::EndOfStream),
-            |tt| (tt.span(), SpanKind::InStream),
+            || (self.eos_span, PosKind::EndOfStream),
+            |tt| (tt.span(), PosKind::InStream),
         );
 
         ParserPos {
-            span_kind,
+            pos_kind: span_kind,
             span,
             checkpoint: self.save(),
         }
@@ -214,7 +214,7 @@ impl Parser {
             .map_or_else(|| (self.eos_span, 0), |tt| (tt.span(), self.seen_ptr - 1));
 
         ParserPos {
-            span_kind: SpanKind::InStream,
+            pos_kind: PosKind::InStream,
             span,
             checkpoint: Checkpoint {
                 seen_ptr,
@@ -236,6 +236,9 @@ impl Parser {
     /// Restores the state of the parser to a [previously saved](Parser::save) [`Checkpoint`].
     ///
     /// This is useful for backtracking when encountering errors.
+    /// Depending on the use case, one of
+    /// [`Parser::restore_forgiving`], [`Parser::seek_to`], or [`Parser::gag`]
+    /// may be more correct and/or ergonomic.
     ///
     /// This method returns the `Span` of the position the parser
     /// was at before restoring which be useful for error reporting.
@@ -255,13 +258,34 @@ impl Parser {
     /// [reported]: Parser::report
     pub fn restore(&mut self, point: &Checkpoint) -> ParserPos {
         let span = self.here();
-        self.seen_ptr = point.seen_ptr;
+        self.restore_impl(point);
         span
+    }
+
+    fn restore_impl(&mut self, point: &Checkpoint) {
+        self.seen_ptr = point.seen_ptr;
+    }
+
+    /// Restores the state of a parser to a previous [position](ParserPos).
+    ///
+    /// This is useful for backtracking when encountering errors.
+    /// Depending on the use case, one of
+    /// [`Parser::restore`], [`Parser::restore_forgiving`], or [`Parser::gag`]
+    /// may be more correct and/or ergonomic.
+    ///
+    /// # Reporting
+    ///
+    /// **NB:** This method has the same "unforgiving" effects on error reporting as [`Parser::restore`].
+    pub fn seek_to(&mut self, point: &ParserPos) {
+        self.restore_impl(&point.checkpoint);
     }
 
     /// Restores the state of the parser to a [previously saved](Parser::save) [`Checkpoint`].
     ///
     /// This is useful for backtracking when encountering errors.
+    /// Depending on the use case, one of
+    /// [`Parser::restore`], [`Parser::seek_to`], or [`Parser::gag`]
+    /// may be more correct and/or ergonomic.
     ///
     /// # Reporting
     ///
@@ -274,7 +298,11 @@ impl Parser {
 
     /// Undos the consumption of a certain number of tokens.
     ///
-    /// This is a lighter, and less powerful alternative to [`Parser::save`] and [`Parser::restore`].
+    /// This is a lighter, and less powerful alternative to [`Parser::save`] and [`Parser::restore`]
+    /// and is useful for backtracking when encountering errors.
+    /// Depending on the use case, one of
+    /// [`Parser::restore`], [`Parser::restore_forgiving`], or [`Parser::seek_to`]
+    /// may be more correct and/or ergonomic.
     ///
     /// # Reporting
     ///
@@ -284,7 +312,7 @@ impl Parser {
             seen_ptr: self.seen_ptr - n,
             error_count: self.error_buf.len(),
         };
-        self.restore(&point);
+        let _ = self.restore(&point);
     }
 
     /// Returns all compile errors [reported] during parsing.
@@ -334,16 +362,25 @@ impl Parser {
 }
 
 #[derive(Debug)]
-pub(crate) enum SpanKind {
+pub(crate) enum PosKind {
     InStream,
     EndOfStream,
 }
 
+/// A reference to a position within the internal stream of a [`Parser`].
+///
+/// This is primarily useful for error reporting and parser recovery.
 #[derive(Debug)]
 pub struct ParserPos {
-    pub(crate) span_kind: SpanKind,
-    pub(crate) span: Span,
-    pub(crate) checkpoint: Checkpoint,
+    pub(crate) pos_kind: PosKind,
+    span: Span,
+    checkpoint: Checkpoint,
+}
+
+impl ToSpan for ParserPos {
+    fn span(&self) -> Span {
+        self.span
+    }
 }
 
 impl ParserPos {
@@ -355,17 +392,13 @@ impl ParserPos {
         Self {
             // NB: this value affects error messages,
             // so should stay constant.
-            span_kind: SpanKind::InStream,
+            pos_kind: PosKind::InStream,
             span: Span::call_site(),
             checkpoint: Checkpoint {
                 seen_ptr: 0,
                 error_count: 0,
             },
         }
-    }
-
-    pub fn restore(&self, cx: &mut Parser) {
-        cx.restore(&self.checkpoint);
     }
 }
 

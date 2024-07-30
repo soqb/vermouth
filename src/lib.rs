@@ -157,7 +157,7 @@ mod tests {
             .or_lit("foo")
             .or_noun("a bar")
             .or_lit("baz");
-        assert_eq!(format!("{exp}"), "expected `foo`, a bar, or `baz`");
+        assert_eq!(exp.to_string(), "expected `foo`, a bar, or `baz`");
     }
 
     #[test]

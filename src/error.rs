@@ -3,7 +3,7 @@ use std::{borrow::Cow, mem::replace};
 
 use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenStream, TokenTree};
 
-use crate::{Parser, ParserPos, SpanKind, ToSpan, ToTokens, TokensExtend};
+use crate::{Parser, ParserPos, PosKind, ToSpan, ToTokens, TokensExtend};
 
 /// An alias for the standard library [`Result`](core::result::Result).
 ///
@@ -45,7 +45,7 @@ impl From<Expected> for ParserPos {
 
 impl ToSpan for Expected {
     fn span(&self) -> Span {
-        self.pos.span
+        self.pos.span()
     }
 }
 
@@ -195,8 +195,11 @@ impl Expected {
         self
     }
 
-    pub fn restore(&self, cx: &mut Parser) {
-        self.pos.restore(cx)
+    /// Restores the state of the parser to the [postion] just before the error was encountered.
+    ///
+    /// Functionally parallel to [`Parser::restore`] and [`Parser::seek_to`].
+    pub fn recover(&self, cx: &mut Parser) {
+        cx.seek_to(&self.pos)
     }
 }
 
@@ -216,7 +219,7 @@ impl fmt::Display for Expected {
         }
         write!(f, "{last}")?;
 
-        if let SpanKind::EndOfStream = self.pos.span_kind {
+        if let PosKind::EndOfStream = self.pos.pos_kind {
             write!(f, ", but found the end of input")?;
         }
 
@@ -398,7 +401,7 @@ impl ToTokens for ErrorKind {
         }
 
         match &self {
-            ErrorKind::Expected(exp) => compile_err_call(buf, exp.pos.span, &exp.to_string()),
+            ErrorKind::Expected(exp) => compile_err_call(buf, exp.pos.span(), &exp.to_string()),
             ErrorKind::Custom(span, custom_err) => {
                 compile_err_call(buf, *span, &custom_err.to_string())
             }

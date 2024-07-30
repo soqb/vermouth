@@ -35,7 +35,7 @@ impl ToTokens for PathSep {
     }
 }
 
-/// Parses a [simple path]
+/// Parses a [simple path].
 ///
 /// [simple path]: https://doc.rust-lang.org/reference/paths.html#simple-paths
 pub fn parse_simple_path(cx: &mut Parser) -> Result<Punctuated<Ident, PathSep>> {
@@ -49,7 +49,8 @@ pub fn parse_simple_path(cx: &mut Parser) -> Result<Punctuated<Ident, PathSep>> 
     loop {
         match cx.parse() {
             Ok(sep) => p.push_sep(sep),
-            Err(_) => {
+            Err(exp) => {
+                exp.recover(cx);
                 break;
             }
         }
