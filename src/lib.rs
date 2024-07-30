@@ -4,6 +4,7 @@
 #![doc(
     html_favicon_url = "https://raw.githubusercontent.com/soqb/vermouth/trunk/assets/logo-small.png"
 )]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(clippy::toplevel_ref_arg)]
 //! _Fortification against [sin][`syn`]._
 //! A new kind of parser for procedural macros.
@@ -48,13 +49,15 @@ mod error;
 mod ext;
 mod parser;
 mod pat;
-mod punctuated;
 mod span;
 
 pub use self::{error::*, ext::*, parser::*, pat::*, span::*};
 
+#[cfg_attr(docsrs, doc(cfg(feature = "attributes")))]
 #[cfg(feature = "attributes")]
 pub mod attributes;
+pub mod path;
+pub mod punctuated;
 
 #[cfg(test)]
 mod tests {
@@ -134,12 +137,12 @@ mod tests {
             cx.eat_ident().map(Spanned::from).map(|s| s == "a"),
             Ok(true),
         );
-        assert_eq!(cx.eat(punct_pat!(+)), Ok(()));
+        assert_eq!(cx.eat(punct_pat!(+)).map(drop), Ok(()));
         assert_eq!(
             cx.eat_ident().map(Spanned::from).map(|s| s == "b"),
             Ok(true),
         );
-        assert_eq!(cx.eat(punct_pat!(==)), Ok(()));
+        assert_eq!(cx.eat(punct_pat!(==)).map(drop), Ok(()));
         assert_eq!(
             cx.eat_ident().map(Spanned::from).map(|s| s == "c"),
             Ok(true),

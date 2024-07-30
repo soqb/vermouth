@@ -1,4 +1,4 @@
-use proc_macro::{Delimiter, Group, Spacing, TokenTree};
+use proc_macro::{Delimiter, Group, Punct, Spacing, TokenTree};
 
 use crate::{Expected, Parser, Result};
 
@@ -231,30 +231,39 @@ macro_rules! for_all_punct_seqs {
 ///
 /// [`Punct`]: proc_macro::Punct
 #[derive(Clone, Copy)]
-pub struct PunctPat<'a> {
-    chars: &'a [char],
+pub struct PunctPat<const N: usize> {
+    chars: [char; N],
     name: &'static str,
 }
 
-impl<'a> PunctPat<'a> {
+impl<const N: usize> PunctPat<N> {
     #[doc(hidden)]
-    pub fn new(chars: &'a [char], name: &'static str) -> Self {
+    pub fn new(chars: [char; N], name: &'static str) -> Self {
         Self { chars, name }
     }
 }
 
-impl<'a> Pattern for PunctPat<'a> {
-    type Output = ();
-    fn eat(self, cx: &mut Parser) -> Result<()> {
+impl<const N: usize> Pattern for PunctPat<N> {
+    type Output = [Punct; N];
+    fn eat(self, cx: &mut Parser) -> Result<[Punct; N]> {
         let Some((&last, rest)) = self.chars.split_last() else {
             unreachable!("`PunctPat`s should have at least one element");
         };
 
         let erf = |err| Expected::lit(err, self.name);
-        for &c in rest {
-            cx.eat_punct_with_spacing(c, Spacing::Joint).map_err(erf)?;
+
+        // should move to `MaybeUninit::assume_init_array`
+        // but without even that api, unsafety is a bit overwhelming here.
+        let mut puncts = std::array::from_fn(|_| Punct::new('#', Spacing::Alone));
+
+        for (i, &c) in rest.iter().enumerate() {
+            let p = cx.eat_punct_with_spacing(c, Spacing::Joint).map_err(erf)?;
+            puncts[i] = p;
         }
-        cx.eat_punct(last).map_err(erf).map(drop)
+
+        let p = cx.eat_punct(last).map_err(erf)?;
+        puncts[puncts.len() - 1] = p;
+        Ok(puncts)
     }
 }
 
@@ -263,7 +272,7 @@ impl<'a> Pattern for PunctPat<'a> {
 macro_rules! ඞ_punct_pat_def {
     ($tt:tt $($char:literal)+) => {
         $crate::PunctPat::new(
-            &[ $($char),* ],
+            [ $($char),* ],
             stringify!($tt),
         )
     };

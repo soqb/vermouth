@@ -1,8 +1,11 @@
 /// Represents a list of values, separated and delimited by other tokens.
 ///
-/// Explicitly, this type represents a list of value-separator pairs
-/// followed by zero or one trailing value.
+/// Explicitly, this type represents the following sequence
+/// * Zero or one leading separators.
+/// * Then, zero or more value-separator pairs
+/// * Then, zero or one trailing separators.
 pub struct Punctuated<T, S> {
+    leading: Option<S>,
     pairs: Vec<(T, S)>,
     trailing: Option<T>,
 }
@@ -13,16 +16,17 @@ impl<T, S> Punctuated<T, S> {
         Self {
             pairs: Vec::new(),
             trailing: None,
+            leading: None,
         }
     }
 
-    fn assert_even(&self) {
-        if self.trailing.is_some() {
+    fn assert_ends_with_sep(&self) {
+        if self.trailing.is_some() || (self.leading.is_some() && self.pairs.is_empty()) {
             panic!("expected trailing punctuation where none was found");
         }
     }
 
-    fn assert_odd(&self) {
+    fn assert_ends_with_value(&self) {
         if self.trailing.is_none() {
             panic!("found trailing punctuation where none was expected");
         }
@@ -35,7 +39,7 @@ impl<T, S> Punctuated<T, S> {
     /// If there is already a trailing value, this method will panic
     /// to avoid inserting two values without a separator between them.
     pub fn push_pair(&mut self, value: T, sep: S) {
-        self.assert_even();
+        self.assert_ends_with_sep();
         self.pairs.push((value, sep));
     }
 
@@ -46,7 +50,7 @@ impl<T, S> Punctuated<T, S> {
     /// If there is already a trailing value, this method will panic
     /// to avoid inserting two values without a separator between them.
     pub fn push_value(&mut self, value: T) {
-        self.assert_even();
+        self.assert_ends_with_sep();
         self.trailing = Some(value);
     }
 
@@ -57,8 +61,12 @@ impl<T, S> Punctuated<T, S> {
     /// If there is no trailing value, this method will panic
     /// to avoid inserting two separators in a row.
     pub fn push_sep(&mut self, sep: S) {
-        self.assert_odd();
-        self.pairs.push((self.trailing.take().unwrap(), sep));
+        self.assert_ends_with_value();
+        if self.pairs.is_empty() {
+            self.leading = Some(sep);
+        } else {
+            self.pairs.push((self.trailing.take().unwrap(), sep));
+        }
     }
 
     pub fn pop_sep(&mut self) -> Option<S> {
@@ -91,7 +99,7 @@ impl<T, S: Default> Punctuated<T, S> {
 
 impl<T, S> Extend<(T, S)> for Punctuated<T, S> {
     fn extend<I: IntoIterator<Item = (T, S)>>(&mut self, iter: I) {
-        self.assert_even();
+        self.assert_ends_with_sep();
         self.pairs.extend(iter);
     }
 }
