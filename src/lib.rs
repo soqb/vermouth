@@ -27,6 +27,12 @@ extern crate proc_macro;
 #[cfg(feature = "proc-macro2")]
 extern crate proc_macro2 as proc_macro;
 
+#[cfg(all(feature = "proc-macro2", feature = "unstable-diagnostics-backend"))]
+compile_error!(
+    "`vermouth` does not support enabling both the `proc-macro2` and `unstable-diagnostics-backend` features \
+    due to limitations in the implementation of `proc-macro2`"
+);
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! ඞ_declare_test {

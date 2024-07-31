@@ -335,10 +335,21 @@ impl PartialEq for DiagnosticKind {
 ///
 /// ## Reporting
 ///
-/// **NB:** In stable Rust (as of version 1.80), there is no support for emitting diagnostics which are not compile errors.
+/// To emit accumulated diagnostics at runtime, [`Diagnostic::emit`] and [`Diagnostic::emit_many`]
+/// return `TokenStream`s which compile to a series of invocations of the [`compile_error`] macro.
 ///
-/// To emit the errors at runtime, `Diagnostic::emit` produces a `TokenStream`
-/// which compiles to a series of invocations of the [`compile_error`] macro.
+/// **NB:** In stable Rust (as of version 1.80),
+/// there is no built-in support for emitting diagnostics other than compile errors.
+///
+/// However, by enabling the `"warnings"` feature, `vermouth` will provide
+/// best effort support for custom [warnings] by carefully emitting `#[must_use]` attributes.
+///
+/// If using the nightly toolchain, enabling the `"unstable-diagnostics-backend"` feature
+/// will use unstable features of the `proc_macro` crate to emit higher-quality errors.
+/// This unstable feature is compatible with but does not imply the `warnings` feature,
+/// and is strictly incompatible with the `proc-macro2` feature.
+///
+/// [warnings]: DiagnosticLevel::Warning
 #[derive(Debug, PartialEq)]
 pub struct Diagnostic {
     kind: DiagnosticKind,
