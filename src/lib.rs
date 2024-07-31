@@ -4,7 +4,7 @@
 #![doc(
     html_favicon_url = "https://raw.githubusercontent.com/soqb/vermouth/trunk/assets/logo-icon.png"
 )]
-#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![allow(clippy::toplevel_ref_arg)]
 #![cfg_attr(
     feature = "unstable-diagnostics-backend",
@@ -65,7 +65,6 @@ mod span;
 pub use self::{error::*, ext::*, parser::*, pat::*, span::*};
 
 #[cfg(feature = "attributes")]
-#[cfg_attr(docsrs, doc(cfg(feature = "attributes")))]
 pub mod attributes;
 pub mod path;
 pub mod punctuated;

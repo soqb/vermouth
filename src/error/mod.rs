@@ -380,7 +380,6 @@ pub enum DiagnosticLevel {
     Error,
     /// A warning, which can be suppressed.
     #[cfg(feature = "warnings")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "warnings")))]
     Warning,
 }
 
