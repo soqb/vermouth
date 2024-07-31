@@ -18,6 +18,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
+name = "toy"
+version = "0.0.0"
+dependencies = [
+ "toy-macros",
+]
+
+[[package]]
+name = "toy-macros"
+version = "0.0.0"
+dependencies = [
+ "vermouth",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

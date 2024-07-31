@@ -238,8 +238,6 @@ impl Parser {
         pass_if: impl FnOnce(TokenTree) -> Option<T>,
         expects: impl FnOnce(ParserPos) -> Expected,
     ) -> Result<T, Expected> {
-        println!("{:?}", self.pos());
-
         let pos = match self.nibble() {
             (None, pos) => pos,
             (Some(tt), pos) => match pass_if(tt) {

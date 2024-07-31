@@ -231,8 +231,6 @@ mod tests {
             .eat_expectantly(|_| <Option<()>>::None, Expected::nothing)
             .unwrap_err();
 
-        println!("{exp:?}");
-
         nibbles_to(cx, 5, 'E');
         nibbles_to(cx, 6, 'F');
 

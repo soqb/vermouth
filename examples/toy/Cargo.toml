@@ -1,0 +1,9 @@
+[package]
+name = "toy"
+description = "a simple test bed & example vermouth macro"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+toy-macros = { path = "macros" }
