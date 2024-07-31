@@ -8,7 +8,11 @@
 #![allow(clippy::toplevel_ref_arg)]
 #![cfg_attr(
     feature = "unstable-diagnostics-backend",
-    feature(proc_macro_diagnostic)
+    feature(
+        // the `vermouth` feature `"unstable-diagnostics-backend"`
+        // requires a nightly toolchain.
+        proc_macro_diagnostic,
+    )
 )]
 
 //! _Fortification against [sin][`syn`]._
@@ -21,6 +25,13 @@
 //! See the methods on the [`Parser`] type for structural documentation.
 //!
 //! [`syn`]: https://crates.io/crates/syn
+//!
+#![cfg_attr(
+    doc,
+    doc = document_features::document_features!(
+        feature_label = r#"<a class="stab portability" id="feature-{feature}" href="feature-{feature}"><code>{feature}</code></a>"#
+    ),
+)]
 
 #[cfg(not(feature = "proc-macro2"))]
 extern crate proc_macro;

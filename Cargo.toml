@@ -12,6 +12,7 @@ exclude = ["assets/", "examples/"]
 members = ["examples/toy", "examples/toy/macros"]
 
 [dependencies]
+document-features = "0.2.10"
 smallvec = { version = "1.13.2", features = ["union"] }
 
 [dependencies.proc-macro2]
@@ -22,20 +23,37 @@ optional = true
 
 [features]
 default = ["attributes"]
-proc-macro2 = ["dep:proc-macro2"]
+
+# NB: we use the `document_features` crate.
+#! ## Stable Features
+
+## Provides support and utilities for parsing and handling Rust attributes.
 attributes = []
+## Enables emitting diagnostic warnings through the `vermouth::Diagnostic` API.
 warnings = []
+## Enables the complete suite of parsing utilities. This contains every stable feature except
+## <a class="stab portability" href="#feature-proc-macro2"><code>proc-macro2</code></a>.
+complete = ["attributes", "warnings"]
+## Rewires `vermouth` to build on top of the [`proc-macro2`] crate, instead of the default `proc_macro` crate.
+## This feature should be enabled with caution; due to the risks of compounding additive features across dependencies,
+## a library enabling this feature should be considered a major breaking change.
+##
+## [`proc-macro2`]: https://crates.io/crates/proc-macro2
+proc-macro2 = ["dep:proc-macro2"]
 
+#! ## Unstable Features <small>(requires nightly)</small>
+
+## Enables the `proc_macro` crate's experimental
+## <a class="stab portability" href="https://github.com/rust-lang/rust/issues/54140"><code>proc_macro_diagnostic</code></a>
+## feature for higher quality diagnostics.
 unstable-diagnostics-backend = []
-
-stable-complete = ["attributes", "warnings"]
 
 # enable this in your r-a config
 # please, please, please do not enable this during compilation.
 rust-analyzer-hack = []
 
 [package.metadata.docs.rs]
-features = ["stable-complete"]
+features = ["complete"]
 
 [package.metadata.cargo-all-features]
 skip_feature_sets = [

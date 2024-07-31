@@ -345,10 +345,15 @@ impl PartialEq for DiagnosticKind {
 /// However, by enabling the `"warnings"` feature, `vermouth` will provide
 /// best effort support for custom [warnings] by carefully emitting `#[must_use]` attributes.
 ///
-/// If using the nightly toolchain, enabling the `"unstable-diagnostics-backend"` feature
-/// will use unstable features of the `proc_macro` crate to emit higher-quality diagnostics.
-/// This unstable feature is compatible with but does not imply the `"warnings"` feature,
-/// and is strictly incompatible with the `"proc-macro2"` feature.
+/// If using a nightly release channel, enabling the
+/// <a class="stab portability" href="index.html#feature-unstable-diagnostics-backend"><code>unstable-diagnostics-backend</code></a>
+/// feature will use the experimental
+/// <a class="stab portability" href="https://github.com/rust-lang/rust/issues/54140"><code>proc_macro_diagnostic</code></a>
+/// feature of the `proc_macro` crate to emit higher-quality diagnostics.
+/// This unstable feature is compatible with but does not imply the
+/// <a class="stab portability" href="index.html#feature-warnings"><code>warnings</code></a> feature,
+/// and is strictly incompatible with the
+/// <a class="stab portability" href="index.html#feature-proc-macro2"><code>proc-macro2</code></a> feature.
 ///
 /// [warnings]: DiagnosticLevel::Warning
 #[derive(Debug, PartialEq)]
@@ -409,8 +414,8 @@ impl Diagnostic {
     ///
     /// # Reporting
     ///
-    /// Each error passed to this constructor
-    /// generates a separate invocation of [`compile_error`].
+    /// All diagnostic passed to this constructor
+    /// are reported together.
     pub fn and_many(errors: impl IntoIterator<Item = Diagnostic>) -> Diagnostic {
         let errors = errors.into_iter();
         let mut buf = Vec::with_capacity(errors.size_hint().0);
@@ -436,7 +441,7 @@ impl Diagnostic {
     ///
     /// # Reporting
     ///
-    /// The passed error is generated alongside those stored in `self`.
+    /// The passed diagnostic is emitted alongside those stored in `self`.
     pub fn and(&mut self, b: impl Into<Diagnostic>) {
         let (a, b) = (self, b.into());
         match (&mut a.kind, b.kind) {
