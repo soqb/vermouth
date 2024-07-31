@@ -36,3 +36,8 @@ rust-analyzer-hack = []
 
 [package.metadata.docs.rs]
 features = ["stable-complete"]
+
+[package.metadata.cargo-all-features]
+skip_feature_sets = [
+    ["proc-macro2", "unstable-diagnostics-backend"],
+]
