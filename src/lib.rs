@@ -29,7 +29,7 @@
 #![cfg_attr(
     doc,
     doc = document_features::document_features!(
-        feature_label = r#"<a class="stab portability" id="feature-{feature}" href="feature-{feature}"><code>{feature}</code></a>"#
+        feature_label = r##"<a class="stab portability" id="feature-{feature}" href="#feature-{feature}"><code>{feature}</code></a>"##
     ),
 )]
 

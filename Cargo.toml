@@ -1,6 +1,6 @@
 [package]
 name = "vermouth"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "a new kind of parser for procedural macros"
 license = "MIT OR Apache-2.0"
@@ -31,17 +31,19 @@ default = ["attributes"]
 attributes = []
 ## Enables emitting diagnostic warnings through the `vermouth::Diagnostic` API.
 warnings = []
-## Enables the complete suite of parsing utilities. This contains every stable feature except
+## Enables the complete suite of parsing utilities. This implies every other stable feature except
 ## <a class="stab portability" href="#feature-proc-macro2"><code>proc-macro2</code></a>.
 complete = ["attributes", "warnings"]
-## Rewires `vermouth` to build on top of the [`proc-macro2`] crate, instead of the default `proc_macro` crate.
-## This feature should be enabled with caution; due to the risks of compounding additive features across dependencies,
-## a library enabling this feature should be considered a major breaking change.
+## Rewires this crate to build on top of the [`proc-macro2`] crate,
+## instead of the default, officially supported `proc_macro` crate.
+## This feature should be enabled with caution, and it is considered a major breaking change to do so.
+## Due to the risks of compounding additive features across dependencies,
+## it can be problematic to enable this feature in a library, since it may break other dependencies of this crate.
 ##
 ## [`proc-macro2`]: https://crates.io/crates/proc-macro2
 proc-macro2 = ["dep:proc-macro2"]
 
-#! ## Unstable Features <small>(requires nightly)</small>
+#! ## Unstable Features <small><i>(nightly)</i></small>
 
 ## Enables the `proc_macro` crate's experimental
 ## <a class="stab portability" href="https://github.com/rust-lang/rust/issues/54140"><code>proc_macro_diagnostic</code></a>
