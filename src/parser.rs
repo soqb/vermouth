@@ -397,13 +397,11 @@ impl Parser {
 
     /// Returns all compile errors [reported] during parsing and emits all diagnostics.
     ///
+    /// This method has the same semantics as [`Diagnostic::emit`].
+    ///
     /// [reported]: Parser::report
     pub fn emit_diagnostics(&mut self) -> TokenStream {
-        let mut buf = TokenStream::new();
-        for error in self.diag_buf.drain(..) {
-            buf.extend(error.emit());
-        }
-        buf
+        Diagnostic::emit_many(self.diag_buf.drain(..))
     }
 
     /// Collects all tokens until a condition is met.

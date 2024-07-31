@@ -2,7 +2,7 @@
 ///
 /// ```compile_fail
 /// // produces: `i say "oh! terrible, terrible!"`
-/// toy::back_on_my_bullshit!(error = "oh! terrible, terrible!");
+/// toy::parrot_diagnostic!(error = "oh! terrible, terrible!");
 /// ```
 ///
 /// ```compile_fail

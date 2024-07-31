@@ -338,16 +338,17 @@ impl PartialEq for DiagnosticKind {
 /// To emit accumulated diagnostics at runtime, [`Diagnostic::emit`] and [`Diagnostic::emit_many`]
 /// return `TokenStream`s which compile to a series of invocations of the [`compile_error`] macro.
 ///
-/// **NB:** In stable Rust (as of version 1.80),
-/// there is no built-in support for emitting diagnostics other than compile errors.
+/// **NB:** The following is subject to change:
 ///
+/// In stable Rust (as of version 1.80),
+/// there is no built-in support for emitting diagnostics other than compile errors.
 /// However, by enabling the `"warnings"` feature, `vermouth` will provide
 /// best effort support for custom [warnings] by carefully emitting `#[must_use]` attributes.
 ///
 /// If using the nightly toolchain, enabling the `"unstable-diagnostics-backend"` feature
-/// will use unstable features of the `proc_macro` crate to emit higher-quality errors.
-/// This unstable feature is compatible with but does not imply the `warnings` feature,
-/// and is strictly incompatible with the `proc-macro2` feature.
+/// will use unstable features of the `proc_macro` crate to emit higher-quality diagnostics.
+/// This unstable feature is compatible with but does not imply the `"warnings"` feature,
+/// and is strictly incompatible with the `"proc-macro2"` feature.
 ///
 /// [warnings]: DiagnosticLevel::Warning
 #[derive(Debug, PartialEq)]
@@ -366,7 +367,12 @@ impl From<Expected> for Diagnostic {
 
 /// The severity level of a [custom `Diagnostic`].
 ///
+/// See [the documentation for `Diagnostic`] for the
+/// semantics of each variant here.
+///
 /// [custom `Diagnostic`]: Diagnostic::custom
+///
+/// [the documentation for `Diagnostic`]: Diagnostic#reporting
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DiagnosticLevel {
@@ -379,11 +385,11 @@ pub enum DiagnosticLevel {
 }
 
 impl Diagnostic {
-    /// Creates an error with a customizable message.
+    /// Creates a [`Diagnostic`] with a customizable message.
     ///
     /// # Reporting
     ///
-    /// Errors creates with this constructor transparently report the message
+    /// Diagnostics made with this constructor transparently report the message
     /// exactly as it is passed.
     #[inline]
     pub fn custom(
@@ -465,6 +471,30 @@ impl Diagnostic {
             }
         }
     }
+
+    /// Emits this diagnostic.
+    ///
+    /// Depending on the feature configuration and execution context,
+    /// some errors may be reported immediately
+    /// and some may be contained in the retuned [`TokenStream`].
+    #[must_use = "reported diagnostics should be returned from proc macros"]
+    #[inline]
+    pub fn emit(self) -> TokenStream {
+        Self::emit_many(Some(self))
+    }
+
+    /// Emits a sequence of diagnostics.
+    ///
+    /// See [`Diagnostic::emit`] for a detailed description.
+    #[must_use = "reported diagnostics should be returned from proc macros"]
+    #[inline]
+    pub fn emit_many(ds: impl IntoIterator<Item = Self>) -> TokenStream {
+        let mut emitter = emit::EmitState::new();
+        for d in ds {
+            d.kind.emit(&mut emitter);
+        }
+        emitter.finish()
+    }
 }
 
 impl DiagnosticKind {
@@ -482,19 +512,5 @@ impl DiagnosticKind {
                 }
             }
         }
-    }
-}
-
-impl Diagnostic {
-    pub fn emit(self) -> TokenStream {
-        Self::emit_many(Some(self))
-    }
-
-    pub fn emit_many(ds: impl IntoIterator<Item = Self>) -> TokenStream {
-        let mut emitter = emit::EmitState::new();
-        for d in ds {
-            d.kind.emit(&mut emitter);
-        }
-        emitter.finish()
     }
 }
