@@ -112,6 +112,7 @@ impl Expected {
     /// assert_eq!(error.to_string(), "expected no tokens");
     /// ```
     #[inline]
+    #[must_use]
     pub fn nothing(pos: impl Into<ParserPos>) -> Self {
         Self {
             pos: pos.into(),
@@ -133,6 +134,7 @@ impl Expected {
     /// assert_eq!(error.to_string(), "expected `foo`");
     /// ```
     #[inline]
+    #[must_use]
     pub fn lit(pos: impl Into<ParserPos>, lit: impl Into<Cow<'static, str>>) -> Self {
         Self::nothing(pos).or_lit(lit)
     }
@@ -205,6 +207,7 @@ impl Expected {
     /// assert_eq!(error.to_string(), "expected `foo`, or any bar");
     /// ```
     #[inline]
+    #[must_use]
     pub fn or_lit(mut self, lit: impl Into<Cow<'static, str>>) -> Self {
         self.push_lit(lit);
         self
@@ -223,6 +226,7 @@ impl Expected {
     /// assert_eq!(error.to_string(), "expected some foo, or `bar`");
     /// ```
     #[inline]
+    #[must_use]
     pub fn or_noun(mut self, noun: impl Into<Cow<'static, str>>) -> Self {
         self.push_noun(noun);
         self
@@ -243,6 +247,7 @@ impl Expected {
     }
 
     #[inline]
+    #[must_use]
     pub fn with_note(mut self, note: impl fmt::Display + fmt::Debug + 'static) -> Self {
         self.add_note(note);
         self
@@ -345,7 +350,7 @@ impl PartialEq for DiagnosticKind {
 /// However, by enabling the `"warnings"` feature, `vermouth` will provide
 /// best effort support for custom [warnings] by carefully emitting `#[must_use]` attributes.
 ///
-/// If using a nightly release channel, enabling the
+/// If using a nightly toolchain, enabling the
 /// <a class="stab portability" href="index.html#feature-unstable-diagnostics-backend"><code>unstable-diagnostics-backend</code></a>
 /// feature will use the experimental
 /// <a class="stab portability" href="https://github.com/rust-lang/rust/issues/54140"><code>proc_macro_diagnostic</code></a>

@@ -3,8 +3,8 @@
 use proc_macro::{Delimiter, Group, Punct, Spacing, Span, TokenStream, TokenTree};
 
 use crate::{
-    Diagnostic, DiagnosticLevel, Expected, Finish, Parse, Parser, Result, Spanned, ToSpan,
-    ToTokens, TokenTreeExt, TokensExtend,
+    Diagnostic, DiagnosticLevel, Expected, Finish, Parse, Parser, Result, ToSpan, ToTokens,
+    TokenTreeExt, TokensExtend,
 };
 
 /// Represents the contents of an attribute which may be [`cfg`] or [`cfg_attr`].
@@ -29,8 +29,8 @@ where
             Err(err) => err,
         };
 
-        let ident = Spanned::from(cx.eat_ident()?);
-        let ident = ident.as_deref();
+        let ident = cx.eat_ident()?;
+        let ident = ident.to_string();
 
         if (ident == "cfg")
             .then_some(())
@@ -55,7 +55,7 @@ where
             let meta = cx.collect_until(
                 |tok| tok.is_punct(','),
                 |_| Ok(Finish::Void),
-                |pos| Err(Expected::lit(pos, ",").into()),
+                |pos, _| Err(Expected::lit(pos, ",")),
             )?;
             let inner = Self::parse_with(cx, args)?;
 
@@ -110,7 +110,7 @@ impl<O, I> Attribute<O, I> {
     ) -> Result<Attribute<O, I>> {
         cx.eat_expectantly(
             |tok| tok.is_punct('#').then_some(()),
-            |pos| Expected::lit(pos, "an attribute"),
+            |pos| Expected::noun(pos, "an attribute"),
         )?;
 
         enum Kind {
@@ -165,15 +165,15 @@ impl<O: ToSpan, I: ToSpan> ToSpan for Attribute<O, I> {
 }
 
 impl<O: ToTokens, I: ToTokens> ToTokens for Attribute<O, I> {
-    fn extend_tokens(&self, buf: &mut TokenStream) {
+    fn extend_tokens(&self, buf: &mut impl TokensExtend) {
         buf.push(Punct::new('#', Spacing::Joint));
-        let group = match self {
+        let contents = match self {
             Attribute::Outer { contents } => contents.to_tokens(),
             Attribute::Inner { bang, contents } => {
                 buf.push(bang.clone());
                 contents.to_tokens()
             }
         };
-        buf.push(Group::new(Delimiter::Bracket, group));
+        buf.push(Group::new(Delimiter::Bracket, contents));
     }
 }

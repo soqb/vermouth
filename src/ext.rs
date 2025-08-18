@@ -1,7 +1,7 @@
 use proc_macro::{TokenStream, TokenTree};
 
 /// An extension trait for manually building [`TokenStream`]s more ergonomically.
-pub trait TokensExtend {
+pub trait TokensExtend: Extend<TokenTree> {
     /// Pushes a single token into a stream.
     fn push(&mut self, tok: impl Into<TokenTree>);
 }
@@ -33,8 +33,9 @@ impl TokenTreeExt for TokenTree {
 
 /// Methods for converting values into [`TokenStream`]s.
 pub trait ToTokens {
-    /// Extends an existing [`TokenStream`] with the contents of a value.
-    fn extend_tokens(&self, buf: &mut TokenStream);
+    /// Extends an existing token buffer with the contents of a value.
+    fn extend_tokens(&self, buf: &mut impl TokensExtend);
+
     /// Builds a [`TokenStream`] from a value.
     #[inline]
     fn to_tokens(&self) -> TokenStream {
@@ -51,7 +52,7 @@ impl ToTokens for TokenStream {
     }
 
     #[inline]
-    fn extend_tokens(&self, buf: &mut TokenStream) {
+    fn extend_tokens(&self, buf: &mut impl TokensExtend) {
         buf.extend(self.clone())
     }
 }

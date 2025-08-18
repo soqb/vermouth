@@ -1,15 +1,52 @@
+use std::iter;
+
 use proc_macro::{Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
 use crate::{Diagnostic, Expected, Pattern, Result, ToSpan, TokensExtend};
 
-/// A simple parser for Rust source which traverses [`TokenTree`]s.
-///
-pub struct Parser {
-    seen: Vec<TokenTree>,
+struct Stream<T, I> {
+    seen_buffer: Vec<T>,
     seen_idx: SeenIdx,
-    stream: proc_macro::token_stream::IntoIter,
-    eos_span: Span,
-    diag_buf: Vec<Diagnostic>,
+    iter: I,
+}
+
+impl<T: Clone, I: Iterator<Item = T>> Stream<T, I> {
+    fn take_in(&mut self) {
+        self.iter
+            .next()
+            .inspect(|tok| self.seen_buffer.push(tok.clone()));
+    }
+
+    pub fn with_capacity(iter: I, len: u32) -> Self {
+        assert!(len < u32::MAX, "stream length cannot be u32::MAX");
+
+        let mut this = Self {
+            seen_buffer: Vec::with_capacity(len as usize),
+            seen_idx: SeenIdx::START,
+            iter,
+        };
+        this.take_in();
+        this
+    }
+
+    pub fn peek(&self) -> Option<T> {
+        self.seen_buffer
+            .get(self.seen_idx.to_u32() as usize)
+            .cloned()
+    }
+
+    pub fn idx(&self) -> SeenIdx {
+        self.seen_idx
+    }
+
+    pub fn move_on(&mut self) -> SeenIdx {
+        self.take_in();
+        self.seen_idx.increment()
+    }
+
+    pub fn seek_to(&mut self, idx: SeenIdx) {
+        self.seen_idx = idx;
+    }
 }
 
 mod indices {
@@ -22,12 +59,9 @@ mod indices {
     /// A value of `0` (i.e. a position guaranteed not to be in the buffer)
     /// is a sentinel marking
     #[repr(transparent)]
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SeenIdx {
-        // notably not `NonZero<u32>`.
-        // its not a soundness issue for the value to overflow and become 0,
-        // it just results in logic errors everywhere.
-        idx: u32,
+        idx: NonZero<u32>,
     }
 
     impl SeenIdx {
@@ -40,25 +74,27 @@ mod indices {
         };
 
         #[inline]
-        pub const fn new_raw(idx: u32) -> Self {
-            SeenIdx { idx }
+        pub(crate) const fn new_raw(idx: u32) -> Self {
+            SeenIdx {
+                idx: NonZero::new(idx).unwrap(),
+            }
         }
 
         #[inline]
-        pub fn increment(&mut self) -> PosRepr {
-            let pos = PosRepr::from_idx(*self);
-            self.idx += 1;
-            pos
+        pub(crate) fn to_u32(self) -> u32 {
+            self.idx.get().wrapping_sub(1)
         }
 
         #[inline]
-        pub fn get(self) -> usize {
-            self.idx as usize - 1
+        pub fn increment(&mut self) -> SeenIdx {
+            let old = *self;
+            self.idx = self.idx.checked_add(1).unwrap();
+            old
         }
 
         #[inline]
         pub fn seek_back(self, n: usize) -> Option<Self> {
-            let idx = self.idx as usize;
+            let idx = self.idx.get() as usize;
             if n >= idx {
                 #[cold]
                 fn none() -> Option<SeenIdx> {
@@ -66,30 +102,34 @@ mod indices {
                 }
                 return none();
             }
-            let idx = idx as usize - n;
-            Some(Self { idx: idx as u32 })
+            let idx = (idx - n) as u32;
+            Some(Self::new_raw(idx))
         }
 
         #[inline]
         pub fn from_pos(pos: PosRepr) -> Option<Self> {
-            pos.0.map(|idx| Self::new_raw(idx.get()))
+            NonZero::new(pos.idx).map(|idx| Self { idx })
         }
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct PosRepr(Option<NonZero<u32>>);
+    pub(crate) struct PosRepr {
+        idx: u32,
+    }
 
     impl PosRepr {
-        pub const EOS: Self = Self(None);
+        pub const EOS: Self = Self { idx: 0 };
 
         #[inline]
-        pub fn from_idx(idx: SeenIdx) -> Self {
-            Self(NonZero::new(idx.idx))
+        pub fn from_seen(seen: SeenIdx) -> Self {
+            Self {
+                idx: seen.idx.get(),
+            }
         }
 
         #[inline]
-        pub fn into_raw(self) -> usize {
-            self.0.map_or(0, NonZero::get) as usize - 1
+        pub fn into_raw(self) -> u32 {
+            self.idx
         }
     }
 }
@@ -117,6 +157,14 @@ impl From<Group> for Parser {
     }
 }
 
+/// A simple parser for Rust source which traverses [`TokenTree`]s.
+///
+pub struct Parser {
+    stream: Stream<TokenTree, proc_macro::token_stream::IntoIter>,
+    eos_span: Span,
+    diag_buf: Vec<Diagnostic>,
+}
+
 impl Parser {
     /// Creates a new [`Parser`].
     ///
@@ -125,11 +173,10 @@ impl Parser {
     ///
     /// For parsing the input from a procedural macro, `parent_span` should be [`Span::call_site()`].
     pub fn new(stream: TokenStream, parent_span: Span) -> Self {
+        let len = stream.clone().into_iter().count();
         Self {
-            stream: stream.into_iter(),
+            stream: Stream::with_capacity(stream.into_iter(), len as u32),
             eos_span: parent_span,
-            seen: Vec::new(),
-            seen_idx: SeenIdx::START,
             diag_buf: Vec::new(),
         }
     }
@@ -148,7 +195,7 @@ impl Parser {
     ///
     /// [report it]: Parser::report
     #[inline]
-    pub fn try_report(&mut self, res: Result<(), impl Into<Diagnostic>>) -> bool {
+    pub fn maybe_report(&mut self, res: Result<(), impl Into<Diagnostic>>) -> bool {
         match res {
             Ok(()) => true,
             Err(err) => {
@@ -158,11 +205,20 @@ impl Parser {
         }
     }
 
-    pub fn pos(&self) -> ParserPos {
+    #[cfg_attr(not(test), expect(dead_code, reason = "test-only function"))]
+    pub(crate) fn raw_pos(&self) -> ParserPos {
         ParserPos {
             span: self.eos_span,
-            pos_data: PosRepr::from_idx(self.seen_idx),
+            repr: PosRepr::from_seen(self.stream.idx()),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.here().is_eos()
+    }
+
+    pub fn peek(&self) -> Option<TokenTree> {
+        self.stream.peek()
     }
 
     /// Consumes a token from the parser's internal stream.
@@ -171,31 +227,24 @@ impl Parser {
     ///
     /// Note that the token is returned in an `Option`, rather than a `Result`,
     /// to ensure that errors are accurate and well-handled.
+    ///
     /// The returned `ParserPos` is useful for creating `Expected` errors;
     /// it represents the position in the stream just before the returned token.
     pub fn nibble(&mut self) -> (Option<TokenTree>, ParserPos) {
-        let opt = match self.seen.get(self.seen_idx.get()) {
-            Some(o) => Some(o.clone()),
-            None => self
-                .stream
-                .next()
-                .inspect(|tok| self.seen.push(tok.clone())),
-        };
-
-        let (opt, pos_data) = opt.map_or_else(
+        let (tt, pos_data) = self.peek().map_or_else(
             || (None, PosRepr::EOS),
             |tt| {
+                let idx = self.stream.move_on();
                 self.eos_span = tt.span();
-                let idx = self.seen_idx.increment();
-                (Some(tt), idx)
+                (Some(tt), PosRepr::from_seen(idx))
             },
         );
 
         (
-            opt,
+            tt,
             ParserPos {
                 span: self.eos_span,
-                pos_data,
+                repr: pos_data,
             },
         )
     }
@@ -203,8 +252,8 @@ impl Parser {
     /// Parses a value from the parser's internal stream using a pattern for context.
     ///
     /// This method is an ergonomic alias for [`Pattern::eat`].
-    pub fn eat<T: Pattern>(&mut self, hungry_guy: T) -> Result<T::Output> {
-        hungry_guy.eat(self)
+    pub fn eat<T: Pattern>(&mut self, meal: T) -> Result<T::Output> {
+        meal.eat(self)
     }
 
     /// Parses a value from the parser's internal stream using some arguments for context.
@@ -222,6 +271,36 @@ impl Parser {
         for<'a> T::Args<'a>: Default,
     {
         T::parse(self)
+    }
+
+    pub fn collect_while<T, C: FromIterator<T>>(
+        &mut self,
+        mut cond: impl FnMut(&TokenTree) -> bool,
+        mut fiddle: impl for<'a> FnMut(&'a mut Self) -> Result<Option<T>>,
+    ) -> Result<C> {
+        let next = || match self.peek() {
+            Some(tok) if cond(&tok) => fiddle(self).transpose(),
+            _ => None,
+        };
+
+        Result::from_iter(iter::from_fn(next))
+    }
+
+    pub fn eat_while<T: Pattern + Clone, C: FromIterator<T::Output>>(
+        &mut self,
+        pat: T,
+        cond: impl FnMut(&TokenTree) -> bool,
+    ) -> Result<C> {
+        self.collect_while(cond, |p| p.eat(pat.clone()).map(Some))
+    }
+
+    pub fn parse_while<'a, T: Parse, C: FromIterator<T>>(
+        &'a mut self,
+        args: impl IntoIterator<Item = T::Args<'a>>,
+        cond: impl FnMut(&TokenTree) -> bool,
+    ) -> Result<C> {
+        let mut args = args.into_iter();
+        self.collect_while(cond, |p| args.next().map(|a| p.parse_with(a)).transpose())
     }
 
     /// A combinator for [`Parser::nibble`], which enables graceful, consistent error reporting.
@@ -297,12 +376,15 @@ impl Parser {
     /// If the parser is at the end of the stream,
     /// it returns a position with a `Span` covering the entire stream.
     pub fn here(&self) -> ParserPos {
-        let (span, pos_data) = self.seen.get(self.seen_idx.get()).map_or_else(
+        let (span, pos_data) = self.peek().map_or_else(
             || (self.eos_span, PosRepr::EOS),
-            |tt| (tt.span(), PosRepr::from_idx(self.seen_idx)),
+            |tt| (tt.span(), PosRepr::from_seen(self.stream.seen_idx)),
         );
 
-        ParserPos { pos_data, span }
+        ParserPos {
+            repr: pos_data,
+            span,
+        }
     }
 
     /// Saves the state of the parser to a [`Checkpoint`].
@@ -310,7 +392,7 @@ impl Parser {
     /// This state can be returned to by [`Parser::restore`].
     pub fn save(&self) -> Checkpoint {
         Checkpoint {
-            seen_idx: self.seen_idx,
+            seen_idx: self.stream.idx(),
             error_count: self.diag_buf.len(),
         }
     }
@@ -340,7 +422,7 @@ impl Parser {
     /// [reported]: Parser::report
     pub fn restore(&mut self, point: &Checkpoint) -> ParserPos {
         let span = self.here();
-        self.seen_idx = point.seen_idx;
+        self.stream.seek_to(point.seen_idx);
         span
     }
 
@@ -355,11 +437,11 @@ impl Parser {
     ///
     /// **NB:** This method has the same "unforgiving" effects on error reporting as [`Parser::restore`].
     pub fn seek_to(&mut self, pos: &ParserPos) {
-        match SeenIdx::from_pos(pos.pos_data) {
-            Some(idx) => self.seen_idx = idx,
+        if let Some(idx) = SeenIdx::from_pos(pos.repr) {
+            self.stream.seek_to(idx);
+        } else {
             // doesn't really make sense,
             // nor is it useful to seek to end-of-stream.
-            None => (),
         }
     }
 
@@ -378,7 +460,7 @@ impl Parser {
         self.restore(point)
     }
 
-    /// Undos the consumption of a certain number of tokens.
+    /// Undoes the consumption of a certain number of tokens.
     ///
     /// This is a lighter, and less powerful alternative to [`Parser::save`] and [`Parser::restore`]
     /// and is useful for backtracking when encountering errors.
@@ -390,9 +472,10 @@ impl Parser {
     ///
     /// **NB:** This method has the same "unforgiving" effects on error reporting as [`Parser::restore`].
     pub fn gag(&mut self, n: usize) {
-        self.seen_idx = self.seen_idx.seek_back(n).unwrap_or_else(|| {
+        let idx = self.stream.idx().seek_back(n).unwrap_or_else(|| {
             panic!("tried to `Parser::gag` to before the beginning of the parser's stream")
         });
+        self.stream.seek_to(idx);
     }
 
     /// Returns all compile errors [reported] during parsing and emits all diagnostics.
@@ -412,7 +495,7 @@ impl Parser {
         &mut self,
         mut stop_condition: impl FnMut(&TokenTree) -> bool,
         stop_behavior: impl FnOnce(&TokenTree) -> Result<Finish>,
-        eos_behavior: impl FnOnce(ParserPos) -> Result<()>,
+        eos_behavior: impl FnOnce(ParserPos, &mut Self) -> Result<()>,
     ) -> Result<TokenStream> {
         let mut buf = TokenStream::new();
         loop {
@@ -432,7 +515,7 @@ impl Parser {
                     buf.push(tok);
                 }
                 (None, pos) => {
-                    return eos_behavior(pos).map(|_| buf);
+                    return eos_behavior(pos, self).map(|_| buf);
                 }
             }
         }
@@ -440,7 +523,7 @@ impl Parser {
 
     /// Returns the remaining contents of the parser's stream, as a [`TokenStream`].
     pub fn rest(&mut self) -> TokenStream {
-        self.stream.by_ref().collect()
+        self.stream.iter.by_ref().collect()
     }
 }
 
@@ -450,7 +533,7 @@ impl Parser {
 #[derive(Debug, Clone, Copy)]
 pub struct ParserPos {
     span: Span,
-    pos_data: PosRepr,
+    repr: PosRepr,
 }
 
 impl ToSpan for ParserPos {
@@ -470,7 +553,7 @@ impl ParserPos {
         Self {
             // NB: this value affects error messages,
             // so should stay constant.
-            pos_data: PosRepr::from_idx(SeenIdx::ARBITRARY),
+            repr: PosRepr::from_seen(SeenIdx::ARBITRARY),
             span: Span::call_site(),
         }
     }
@@ -478,12 +561,12 @@ impl ParserPos {
     /// Returns whether this [`ParserPos`] is the position at the end of the stream,
     /// after the last token.
     pub fn is_eos(self) -> bool {
-        self.pos_data == PosRepr::EOS
+        self.repr == PosRepr::EOS
     }
 
-    #[cfg(test)]
-    pub(crate) fn raw_idx(self) -> usize {
-        self.pos_data.into_raw()
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub(crate) fn into_raw(self) -> u32 {
+        self.repr.into_raw()
     }
 }
 

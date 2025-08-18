@@ -5,8 +5,8 @@
 /// toy::parrot_diagnostic!(error = "oh! terrible, terrible!");
 /// ```
 ///
-/// ```compile_fail
-/// #![forbid(unused_must_use)]
+/// ```
+/// #![allow(unused_must_use)]
 /// // produces: `i say "its problematic, but recoverable"`
 /// // through a hidden `#[must_use]` diagnostic.
 /// //

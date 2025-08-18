@@ -67,14 +67,6 @@ fn emit_warning(buf: &mut TokenStream, span: Span, mut msg: String) {
 
     in_const_block(buf, move |buf| {
         in_attr(buf, move |buf| {
-            buf.push(Ident::new("allow", Span::call_site()));
-
-            let mut group = TokenStream::new();
-            group.push(Ident::new("non_camel_case_types", Span::call_site()));
-            buf.push(Group::new(Delimiter::Parenthesis, group));
-        });
-
-        in_attr(buf, move |buf| {
             buf.push(Ident::new("must_use", span));
             buf.push(Punct::new('=', Alone));
 
@@ -87,10 +79,10 @@ fn emit_warning(buf: &mut TokenStream, span: Span, mut msg: String) {
         });
 
         buf.push(Ident::new("struct", span));
-        buf.push(Ident::new("mock_warning", span));
+        buf.push(Ident::new("Warning", span));
         buf.push(Punct::new(';', Alone));
 
-        buf.push(Ident::new("mock_warning", span));
+        buf.push(Ident::new("Warning", span));
         buf.push(Punct::new(';', Alone));
     })
 }

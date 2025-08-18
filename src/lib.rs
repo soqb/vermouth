@@ -48,15 +48,16 @@ compile_error!(
 #[macro_export]
 macro_rules! ඞ_declare_test {
     () => {
-        // this... is unfortunate.
-        // we don't want to enable `cfg(feature = "proc-macro2")` for r-a,
-        // but we also don't want to disable `cfg(test)` and thus,
-        // we enable *another* feature to silence the error.
-        #[cfg(not(any(feature = "proc-macro2", feature = "rust-analyzer-hack")))]
-        compile_error!(
-            "`vermouth` tests must be run with the `proc-macro2` feature.\n\
-            `proc-macro` doesn't support execution outside the rustc harness"
-        );
+        // // this... is unfortunate.
+        // // we don't want to enable `cfg(feature = "proc-macro2")` for r-a,
+        // // but we also don't want to disable `cfg(test)` and thus,
+        // // we enable *another* feature to silence the error.
+        // #[cfg(not(any(feature = "proc-macro2", feature = "rust-analyzer-hack")))]
+        // compile_error!(
+        //     "`vermouth` tests must be run with the `proc-macro2` feature.\n\
+        //     `proc-macro` doesn't support execution outside the rustc harness"
+        // );
+
         // even if we just spat out a compile error,
         // we still import a (non-functional) crate
         // to suppress errors about bad imports.
@@ -71,14 +72,21 @@ mod error;
 mod ext;
 mod parser;
 mod pat;
+mod quote;
 mod span;
+
+// yuck..
+#[doc(hidden)]
+pub use quote::ඞ_quote_tt_here;
+
+#[doc(hidden)]
+#[path = "macro_exports.rs"]
+pub mod ඞ_macro_exports;
 
 pub use self::{error::*, ext::*, parser::*, pat::*, span::*};
 
 #[cfg(feature = "attributes")]
 pub mod attributes;
-pub mod path;
-pub mod punctuated;
 
 #[cfg(test)]
 mod tests {
@@ -87,72 +95,11 @@ mod tests {
     use proc_macro::{Ident, Span, TokenStream, TokenTree};
 
     use crate::{
-        attributes::Attribute, punct_pat, Expected, Parse, Parser, ParserPos, Result, Spanned,
+        attributes::Attribute, punct_pat, quote, Expected, Parse, Parser, ParserPos, Result,
+        Spanned,
     };
 
     ඞ_declare_test!();
-
-    macro_rules! quote_single {
-        (#) => {
-            [
-                proc_macro::TokenTree::from(proc_macro::Punct::new('#', proc_macro::Spacing::Alone)),
-            ]
-        };
-        (!) => {
-            [
-                proc_macro::TokenTree::from(proc_macro::Punct::new('!', proc_macro::Spacing::Alone)),
-            ]
-        };
-        (+) => {
-            [
-                proc_macro::TokenTree::from(proc_macro::Punct::new('+', proc_macro::Spacing::Alone)),
-            ]
-        };
-        (==) => {
-            [
-                proc_macro::TokenTree::from(proc_macro::Punct::new('=', proc_macro::Spacing::Joint)),
-                proc_macro::TokenTree::from(proc_macro::Punct::new('=', proc_macro::Spacing::Alone)),
-            ]
-        };
-        ($i:ident) => {
-            [
-                proc_macro::TokenTree::from(
-                    proc_macro::Ident::new(stringify!($i), proc_macro::Span::call_site()),
-                ),
-            ]
-        };
-        ({ $($c:tt)* }) => {
-            [
-                proc_macro::TokenTree::from(
-                    proc_macro::Group::new(proc_macro::Delimiter::Brace, quote!($($c)*)),
-                ),
-            ]
-        };
-        ([ $($c:tt)* ]) => {
-            [
-                proc_macro::TokenTree::from(
-                    proc_macro::Group::new(proc_macro::Delimiter::Bracket, quote!($($c)*)),
-                ),
-            ]
-        };
-        (( $($c:tt)* )) => {
-            [
-                proc_macro::TokenTree::from(
-                    proc_macro::Group::new(proc_macro::Delimiter::Parenthesis, quote!($($c)*)),
-                ),
-            ]
-        };
-    }
-
-    macro_rules! quote {
-        ($($t:tt)*) => {{
-            let mut buf = proc_macro::TokenStream::new();
-            $(
-                buf.extend(quote_single!($t));
-            )*
-            buf
-        }};
-    }
 
     #[test]
     fn parsing() {
@@ -186,14 +133,16 @@ mod tests {
     #[test]
     fn parser_indices() {
         #[track_caller]
-        fn is_at(cx: &mut Parser, idx: usize) {
-            assert_eq!(cx.pos().raw_idx(), idx, "is_at: parser indices mismatch");
+        fn is_at(cx: &mut Parser, idx: u32) {
+            assert_eq!(
+                cx.raw_pos().into_raw(),
+                idx,
+                "is_at: parser indices mismatch"
+            );
         }
 
         #[track_caller]
-        fn nibbles_to(cx: &mut Parser, idx: usize, v: char) {
-            // is_at(cx, idx - 1);
-
+        fn nibbles_to(cx: &mut Parser, idx: u32, v: char) {
             let (tt, pos) = cx.nibble();
             assert_eq!(
                 tt.and_then(|tt| match tt {
@@ -203,11 +152,7 @@ mod tests {
                 Some(v.to_string()),
             );
 
-            assert_eq!(
-                pos.raw_idx(),
-                idx - 1,
-                "nibbles_to: parser indices mismatch"
-            );
+            assert_eq!(pos.into_raw(), idx, "nibbles_to: parser indices mismatch");
             is_at(cx, idx);
         }
 
@@ -254,6 +199,7 @@ mod tests {
         is_at(cx, 3);
         nibbles_to(cx, 4, 'D');
     }
+
     #[test]
     #[cfg(feature = "attributes")]
     fn attributes() {

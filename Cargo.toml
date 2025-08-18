@@ -1,6 +1,6 @@
 [package]
 name = "vermouth"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 description = "a new kind of parser for procedural macros"
 license = "MIT OR Apache-2.0"
@@ -38,7 +38,7 @@ complete = ["attributes", "warnings"]
 ## instead of the default, officially supported `proc_macro` crate.
 ## This feature should be enabled with caution, and it is considered a major breaking change to do so.
 ## Due to the risks of compounding additive features across dependencies,
-## it can be problematic to enable this feature in a library, since it may break other dependencies of this crate.
+## it can be problematic to enable this feature in a library, since it may break other dependents of this crate.
 ##
 ## [`proc-macro2`]: https://crates.io/crates/proc-macro2
 proc-macro2 = ["dep:proc-macro2"]
