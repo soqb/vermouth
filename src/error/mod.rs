@@ -252,6 +252,8 @@ impl Expected {
         self.add_note(note);
         self
     }
+
+    // pub fn merge_from(&mut self)
 }
 
 impl fmt::Display for Expected {

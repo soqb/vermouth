@@ -1,8 +1,6 @@
-use std::iter;
-
 use proc_macro::{Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
-use crate::{Diagnostic, Expected, Pattern, Result, ToSpan, TokensExtend};
+use crate::{Diagnostic, Expected, Pattern, Result, ToSpan};
 
 struct Stream<T, I> {
     seen_buffer: Vec<T>,
@@ -273,53 +271,23 @@ impl Parser {
         T::parse(self)
     }
 
-    pub fn collect_while<T, C: FromIterator<T>>(
-        &mut self,
-        mut cond: impl FnMut(&TokenTree) -> bool,
-        mut fiddle: impl for<'a> FnMut(&'a mut Self) -> Result<Option<T>>,
-    ) -> Result<C> {
-        let next = || match self.peek() {
-            Some(tok) if cond(&tok) => fiddle(self).transpose(),
-            _ => None,
-        };
-
-        Result::from_iter(iter::from_fn(next))
-    }
-
-    pub fn eat_while<T: Pattern + Clone, C: FromIterator<T::Output>>(
-        &mut self,
-        pat: T,
-        cond: impl FnMut(&TokenTree) -> bool,
-    ) -> Result<C> {
-        self.collect_while(cond, |p| p.eat(pat.clone()).map(Some))
-    }
-
-    pub fn parse_while<'a, T: Parse, C: FromIterator<T>>(
-        &'a mut self,
-        args: impl IntoIterator<Item = T::Args<'a>>,
-        cond: impl FnMut(&TokenTree) -> bool,
-    ) -> Result<C> {
-        let mut args = args.into_iter();
-        self.collect_while(cond, |p| args.next().map(|a| p.parse_with(a)).transpose())
-    }
-
-    /// A combinator for [`Parser::nibble`], which enables graceful, consistent error reporting.
+    /// A combinator for [`Parser::nibble`] which enables graceful, consistent error reporting.
     ///
     /// Both in the case that there are no tokens in the parser's stream ([`Parser::nibble`] returns `None`),
-    /// and in the case that `None` is returned from the `pass_if` argument,
+    /// and in the case that `None` is returned from the `try_pass` argument,
     /// the same error (supplied by the `expects` argument) is returned.
     ///
-    /// Note that due to borrow checker restrictions, the parser is inaccessible during the `pass_if` call,
-    /// So any transitive data must be returned from `pass_if` (and thus the entire funciton)
+    /// Note that due to borrow checker restrictions, the parser is inaccessible during the `try_pass` call,
+    /// So any transitive data must be returned from `try_pass` (and thus the entire funciton)
     /// to be used in parsing.
     pub fn eat_expectantly<T>(
         &mut self,
-        pass_if: impl FnOnce(TokenTree) -> Option<T>,
+        try_pass: impl FnOnce(TokenTree) -> Option<T>,
         expects: impl FnOnce(ParserPos) -> Expected,
     ) -> Result<T, Expected> {
         let pos = match self.nibble() {
             (None, pos) => pos,
-            (Some(tt), pos) => match pass_if(tt) {
+            (Some(tt), pos) => match try_pass(tt) {
                 None => pos,
                 Some(res) => return Ok(res),
             },
@@ -354,7 +322,7 @@ impl Parser {
         )
     }
 
-    /// Similar to [`Parser::eat_punct`], but considers the `Punct`'s spacing.
+    /// Similar to [`Parser::eat_punct`], but taking into account the [`Punct`]'s spacing.
     pub fn eat_punct_with_spacing(
         &mut self,
         punct: char,
@@ -378,7 +346,7 @@ impl Parser {
     pub fn here(&self) -> ParserPos {
         let (span, pos_data) = self.peek().map_or_else(
             || (self.eos_span, PosRepr::EOS),
-            |tt| (tt.span(), PosRepr::from_seen(self.stream.seen_idx)),
+            |tt| (tt.span(), PosRepr::from_seen(self.stream.idx())),
         );
 
         ParserPos {
@@ -489,36 +457,21 @@ impl Parser {
 
     /// Collects all tokens until a condition is met.
     ///
-    /// The behavior of the final token is specified by [`Finish`],
-    /// and the end-of-stream response is handled by the `eos_behavior` parameter.
-    pub fn collect_until(
+    /// A token which fails the condition will not be added to the collection.
+    ///
+    /// An end-of-stream will finish the collection.
+    /// It's common to use another parser method
+    /// immediately after to detect such a case.
+    pub fn collect_until<C: FromIterator<TokenTree>>(
         &mut self,
         mut stop_condition: impl FnMut(&TokenTree) -> bool,
-        stop_behavior: impl FnOnce(&TokenTree) -> Result<Finish>,
-        eos_behavior: impl FnOnce(ParserPos, &mut Self) -> Result<()>,
-    ) -> Result<TokenStream> {
-        let mut buf = TokenStream::new();
-        loop {
-            match self.nibble() {
-                (Some(tok), _) => {
-                    if stop_condition(&tok) {
-                        match stop_behavior(&tok)? {
-                            Finish::Eat => buf.push(tok),
-                            Finish::Gag => {
-                                self.gag(1);
-                            }
-                            Finish::Void => (),
-                        }
-                        return Ok(buf);
-                    }
-
-                    buf.push(tok);
-                }
-                (None, pos) => {
-                    return eos_behavior(pos, self).map(|_| buf);
-                }
-            }
-        }
+    ) -> C {
+        std::iter::from_fn(move || match self.nibble() {
+            (Some(tok), _) if stop_condition(&tok) => None,
+            (Some(tok), _) => Some(tok),
+            (None, _) => None,
+        })
+        .collect()
     }
 
     /// Returns the remaining contents of the parser's stream, as a [`TokenStream`].
@@ -548,7 +501,7 @@ impl ParserPos {
     /// Values returned from this method should never be used for modifying a `Parser`.
     ///
     /// While this method is allowed to produce absurd or illogical results,
-    /// it is never unsafe to call.
+    /// it is never unsound to call.
     pub fn arbitrary() -> Self {
         Self {
             // NB: this value affects error messages,
@@ -568,17 +521,6 @@ impl ParserPos {
     pub(crate) fn into_raw(self) -> u32 {
         self.repr.into_raw()
     }
-}
-
-/// Describes the termination behaviour of [`Parser::collect_until`].
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Finish {
-    /// Consume the token and push it into the collection buffer.
-    Eat,
-    /// Leave the token in the parser stream.
-    Gag,
-    /// Drop the token.
-    Void,
 }
 
 /// A common interface for parsing values from a [`Parser`].

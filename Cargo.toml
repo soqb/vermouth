@@ -1,11 +1,11 @@
 [package]
 name = "vermouth"
 version = "0.3.0"
-edition = "2021"
+edition = "2024"
 description = "a new kind of parser for procedural macros"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/soqb/vermouth"
-rust-version = "1.80"
+rust-version = "1.89"
 exclude = ["assets/", "examples/"]
 
 [workspace]

@@ -44,6 +44,21 @@ compile_error!(
     due to limitations in the implementation of `proc-macro2`"
 );
 
+/// A hygiene-exploiting hack to allow macros to be exported at non-root paths.
+macro_rules! export_macro {
+    (#[unused_name($unused:ident)] $(#[$attr:meta])* macro_rules! $name:ident { $($t:tt)* }) => {
+        $(#[$attr])*
+        #[macro_export]
+        #[doc(hidden)]
+        macro_rules! $unused {
+            $($t)*
+        }
+
+        #[doc(inline)]
+        pub use $unused as $name;
+    };
+}
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! ඞ_declare_test {
@@ -68,22 +83,20 @@ macro_rules! ඞ_declare_test {
     };
 }
 
+#[macro_use]
+mod ctfe;
+
 mod error;
 mod ext;
 mod parser;
 mod pat;
 mod quote;
 mod span;
-
-// yuck..
-#[doc(hidden)]
-pub use quote::ඞ_quote_tt_here;
+pub use self::{error::*, ext::*, parser::*, pat::*, quote::*, span::*};
 
 #[doc(hidden)]
-#[path = "macro_exports.rs"]
+#[path = "macro_exports/mod.rs"]
 pub mod ඞ_macro_exports;
-
-pub use self::{error::*, ext::*, parser::*, pat::*, span::*};
 
 #[cfg(feature = "attributes")]
 pub mod attributes;
@@ -92,11 +105,11 @@ pub mod attributes;
 mod tests {
     use std::iter;
 
-    use proc_macro::{Ident, Span, TokenStream, TokenTree};
+    use proc_macro::{Ident, Literal, Span, TokenStream, TokenTree};
 
     use crate::{
-        attributes::Attribute, punct_pat, quote, Expected, Parse, Parser, ParserPos, Result,
-        Spanned,
+        Expected, Parse, Parser, ParserPos, Result, Spanned, attributes::Attribute, punct_pat,
+        quote,
     };
 
     ඞ_declare_test!();
@@ -136,13 +149,13 @@ mod tests {
         fn is_at(cx: &mut Parser, idx: u32) {
             assert_eq!(
                 cx.raw_pos().into_raw(),
-                idx,
+                idx + 1,
                 "is_at: parser indices mismatch"
             );
         }
 
         #[track_caller]
-        fn nibbles_to(cx: &mut Parser, idx: u32, v: char) {
+        fn nibbles_to(cx: &mut Parser, idx: Option<u32>, v: char) {
             let (tt, pos) = cx.nibble();
             assert_eq!(
                 tt.and_then(|tt| match tt {
@@ -152,39 +165,38 @@ mod tests {
                 Some(v.to_string()),
             );
 
-            assert_eq!(pos.into_raw(), idx, "nibbles_to: parser indices mismatch");
-            is_at(cx, idx);
+            let pos = pos.into_raw();
+            let pos = (pos > 0).then_some(pos);
+
+            assert_eq!(pos, idx, "nibbles_to: parser indices mismatch");
+
+            if let Some(idx) = idx {
+                is_at(cx, idx);
+            }
         }
 
-        let chars = 'A'..='Z';
-        let tokens = {
-            let mut i = 0;
-            move || {
-                chars
-                    .clone()
-                    .nth(i)
-                    .inspect(|_| i += 1)
-                    .map(|c| TokenTree::from(Ident::new(&c.to_string(), Span::call_site())))
-            }
-        };
-        let tokens = TokenStream::from_iter(iter::from_fn(tokens));
+        let tokens: TokenStream = ('A'..='Z')
+            .map(|c| Ident::new(&c.to_string(), Span::call_site()))
+            .map(TokenTree::from)
+            .collect();
         let ref mut cx = Parser::new(tokens, Span::call_site());
+        eprintln!("{:?}", cx.here());
 
-        nibbles_to(cx, 1, 'A');
-        nibbles_to(cx, 2, 'B');
+        nibbles_to(cx, Some(1), 'A');
+        nibbles_to(cx, Some(2), 'B');
 
         let ckp = cx.save();
-        nibbles_to(cx, 3, 'C');
-        nibbles_to(cx, 4, 'D');
-        nibbles_to(cx, 5, 'E');
+        nibbles_to(cx, Some(3), 'C');
+        nibbles_to(cx, Some(4), 'D');
+        nibbles_to(cx, Some(5), 'E');
 
         cx.gag(3);
-        nibbles_to(cx, 3, 'C');
-        nibbles_to(cx, 4, 'D');
-        nibbles_to(cx, 5, 'E');
+        nibbles_to(cx, Some(3), 'C');
+        nibbles_to(cx, Some(4), 'D');
+        nibbles_to(cx, Some(5), 'E');
 
         cx.restore(&ckp);
-        nibbles_to(cx, 3, 'C');
+        nibbles_to(cx, Some(3), 'C');
 
         is_at(cx, 3);
 
@@ -192,12 +204,81 @@ mod tests {
             .eat_expectantly(|_| <Option<()>>::None, Expected::nothing)
             .unwrap_err();
 
-        nibbles_to(cx, 5, 'E');
-        nibbles_to(cx, 6, 'F');
+        nibbles_to(cx, Some(5), 'E');
+        nibbles_to(cx, Some(6), 'F');
 
         exp.recover(cx);
         is_at(cx, 3);
-        nibbles_to(cx, 4, 'D');
+        nibbles_to(cx, Some(4), 'D');
+    }
+
+    #[track_caller]
+    fn assert_streams_match(real_a: TokenStream, real_b: TokenStream) {
+        #[track_caller]
+        fn assert_tts_match(a: TokenTree, b: TokenTree) {
+            match (&a, &b) {
+                (TokenTree::Group(a), TokenTree::Group(b)) => {
+                    assert_eq!(a.delimiter(), b.delimiter());
+                    assert_streams_match(a.stream(), b.stream());
+                }
+                (TokenTree::Ident(_), TokenTree::Ident(_))
+                | (TokenTree::Punct(_), TokenTree::Punct(_))
+                | (TokenTree::Literal(_), TokenTree::Literal(_)) => {
+                    assert_eq!(a.to_string(), b.to_string())
+                }
+                _ => panic!("{a:?} and {b:?} did not match"),
+            }
+        }
+
+        let (mut a_len, mut b_len) = (0, 0);
+        let mut a = real_a.clone().into_iter();
+        let mut b = real_b.clone().into_iter();
+        loop {
+            let (a, b) = (a.next(), b.next());
+            a_len += a.is_some() as usize;
+            b_len += b.is_some() as usize;
+            match (a, b) {
+                (None, None) => return,
+                (Some(a), Some(b)) => assert_tts_match(a, b),
+                _ => {
+                    panic!("stream len mismatch. {real_a:?} has {a_len} but {real_b:?} has {b_len}")
+                }
+            }
+        }
+    }
+
+    /// An inference guide.
+    fn tt(tt: impl Into<TokenTree>) -> TokenTree {
+        tt.into()
+    }
+
+    #[test]
+    fn quote_literals() {
+        let quoted = quote! {
+            144
+            12u8
+            7f64
+            7.
+            "foobar"
+            c"coobar"
+            b"boobar"
+            'x'
+            b'y'
+        };
+        let manual = [
+            tt(Literal::u8_unsuffixed(144)),
+            tt(Literal::u8_suffixed(12)),
+            tt(Literal::f64_suffixed(7.)),
+            tt(Literal::f32_unsuffixed(7.)),
+            tt(Literal::string("foobar")),
+            tt(Literal::c_string(c"coobar")),
+            tt(Literal::byte_string(b"boobar")),
+            tt(Literal::character('x')),
+            tt(Literal::byte_character(b'y')),
+        ]
+        .into_iter()
+        .collect();
+        assert_streams_match(quoted, manual);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use proc_macro::{Delimiter, Group, Punct, Spacing, TokenTree};
 
-use crate::{Expected, Parser, Result};
+use crate::{Expected, Parser, ParserPos, Result};
 
 /// Performs simple pattern-matched parsing through a [`Parser`] object.
 ///
@@ -68,6 +68,7 @@ pub trait Pattern {
     fn eat(self, cx: &mut Parser) -> Result<Self::Output>;
 }
 
+/// Parses a group using this delimiter.
 impl Pattern for Delimiter {
     type Output = Group;
 
@@ -93,11 +94,11 @@ impl Pattern for Delimiter {
 pub struct Eos;
 
 impl Pattern for Eos {
-    type Output = ();
+    type Output = ParserPos;
 
-    fn eat(self, cx: &mut Parser) -> Result<Self::Output> {
+    fn eat(self, cx: &mut Parser) -> Result<ParserPos> {
         if cx.is_empty() {
-            Ok(())
+            Ok(cx.here())
         } else {
             Err(Expected::nothing(cx.here()))
         }
@@ -124,10 +125,10 @@ impl Pattern for Eos {
 /// }
 ///
 /// macro_rules! expand_assert_makes_sense {
-///     ($token:tt $($char:literal)*) => {
+///     ({ $($t:tt)* } $($char:literal)*) => {
 ///         let chars: &[char] = &[ $($char),* ];
 ///         let string = String::from_iter(chars);
-///         assert_eq!(stringify!($token), string);
+///         assert_eq!(stringify!($($t)*), string);
 ///     }
 /// }
 ///
