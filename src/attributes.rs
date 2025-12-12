@@ -1,12 +1,12 @@
 //! Provides utilities for parsing attributes.
 
-use std::marker::PhantomData;
+use std::{convert::Infallible, error::Error, marker::PhantomData};
 
 use proc_macro::{Delimiter, Punct, Span, TokenStream, TokenTree};
 
 use crate::{
-    Diagnostic, DiagnosticLevel, Eos, Expected, Parse, Parser, Result, ToSpan, ToTokens,
-    TokenTreeExt, extend_quote, quote, quote_fn,
+    Diagnostic, DiagnosticLevel, Eos, Expected, Parse, Parser, Result, ToSpan, TokenTreeExt,
+    TryToTokens, TtResult, delay_quote, quote, try_extend_quote,
 };
 
 /// An attribute which may be [`cfg`].
@@ -37,11 +37,13 @@ impl<T: Parse> Parse for CfgLeaf<T> {
     }
 }
 
-impl<T: ToTokens> ToTokens for CfgLeaf<T> {
-    fn extend_tokens(&self, mut buf: &mut TokenStream) {
+impl<T: TryToTokens> TryToTokens for CfgLeaf<T> {
+    type Error = T::Error;
+
+    fn try_extend_tokens(&self, buf: &mut TokenStream) -> TtResult<(), T::Error> {
         match self {
-            CfgLeaf::Cfg { meta } => extend_quote!(buf <- { cfg(@meta) }),
-            CfgLeaf::Other(c) => c.extend_tokens(buf),
+            CfgLeaf::Cfg { meta } => try_extend_quote!(buf, { cfg(@meta) }),
+            CfgLeaf::Other(c) => c.try_extend_tokens(buf),
         }
     }
 }
@@ -51,7 +53,7 @@ impl<T: ToTokens> ToTokens for CfgLeaf<T> {
 /// [`cfg_attr`]: https://doc.rust-lang.org/nightly/reference/conditional-compilation.html#the-cfg_attr-attribute
 pub struct Cfgable<T> {
     // FIXME: no evidence this architecture is better than the naive (recursive) approach.
-    //     it was lowkey fun though.
+    //     it was lowkey fun though. something something cache locality.
     cfg_attr_metas: Vec<TokenStream>,
     pub inner: T,
 }
@@ -62,7 +64,8 @@ impl<T: Parse> Parse for Cfgable<T> {
     fn parse_with(cx: &mut Parser, args: T::Args<'_>) -> Result<Self> {
         let mut cfg_attr_metas = Vec::new();
         // sometimes borrowck just needs a little helping hand.
-        // by reborrowing `cx`, we can ensure the shadowing variable can borrow from `cx_store`.
+        // by reborrowing `cx`, we shorten the borrow lifetime,
+        // ensuring the shadowing variable can borrow from `cx_store`.
         let mut cx_store;
         let mut cx = cx;
         let inner = loop {
@@ -89,44 +92,50 @@ impl<T: Parse> Parse for Cfgable<T> {
     }
 }
 
-fn cfgable_extend_tokens(metas: &[TokenStream], inner: &impl ToTokens, mut buf: &mut TokenStream) {
+fn cfgable_extend_tokens<T: TryToTokens>(
+    metas: &[TokenStream],
+    inner: &T,
+    buf: &mut TokenStream,
+) -> TtResult<(), T::Error> {
     // we iterate in reverse, building up everything that `cfg_attr` parameterises in a single step.
     let Some((last_meta, rest)) = metas.split_last() else {
-        inner.extend_tokens(buf);
-        return;
+        inner.try_extend_tokens(buf)?;
+        return Ok(());
     };
 
     let mut args = quote! { @last_meta, @inner };
 
     for meta in rest.iter().rev() {
-        args = quote! { @meta, cfg_attr(@args) }
+        args = quote! { @meta, cfg_attr(@args) };
     }
 
-    extend_quote!(buf <- { cfg_attr(@args) });
+    try_extend_quote!(buf, { cfg_attr(@args) })
 }
 
 impl<T> Cfgable<T> {
-    pub fn extend_tokens_as_cfg(&self, buf: &mut TokenStream) {
+    pub fn try_extend_tokens_as_cfg(&self, buf: &mut TokenStream) -> TtResult<()> {
         let Some((last, rest)) = self.cfg_attr_metas.split_last() else {
-            return;
+            return Ok(());
         };
 
-        cfgable_extend_tokens(&rest, &quote_fn! { cfg(@last) }, buf);
+        cfgable_extend_tokens(&rest, &delay_quote! { cfg(@last) }, buf)
     }
 
     /// Reparameterises a `cfg_attr` attribute into a `cfg`.
     ///
     /// For example, `cfg_attr(foo, cfg_attr(bar, baz))` becomes `cfg_attr(foo, cfg(bar))`.
-    pub fn to_tokens_as_cfg(&self) -> TokenStream {
+    pub fn try_to_tokens_as_cfg(&self) -> TtResult<TokenStream> {
         let mut buf = TokenStream::new();
-        self.extend_tokens_as_cfg(&mut buf);
-        buf
+        self.try_extend_tokens_as_cfg(&mut buf)?;
+        Ok(buf)
     }
 }
 
-impl<T: ToTokens> ToTokens for Cfgable<T> {
-    fn extend_tokens(&self, buf: &mut TokenStream) {
-        cfgable_extend_tokens(&self.cfg_attr_metas, &self.inner, buf);
+impl<T: TryToTokens> TryToTokens for Cfgable<T> {
+    type Error = T::Error;
+
+    fn try_extend_tokens(&self, buf: &mut TokenStream) -> TtResult<(), Self::Error> {
+        cfgable_extend_tokens(&self.cfg_attr_metas, &self.inner, buf)
     }
 }
 
@@ -205,6 +214,45 @@ impl<O, I> Attribute<O, I> {
     }
 }
 
+impl<O, I> Parse for Attribute<O, I>
+where
+    O: Parse,
+    I: for<'a> Parse<Args<'a> = O::Args<'a>>,
+{
+    type Args<'a> = O::Args<'a>;
+
+    fn parse_with(cx: &mut Parser, args: Self::Args<'_>) -> Result<Self> {
+        Self::parse_separately(cx, args, O::parse_with, I::parse_with)
+    }
+}
+
+impl<O: ToSpan, I: ToSpan> ToSpan for Attribute<O, I> {
+    fn span(&self) -> Span {
+        match self {
+            Attribute::Outer { contents } => contents.span(),
+            Attribute::Inner { contents, .. } => contents.span(),
+        }
+    }
+}
+
+impl<E: From<Infallible> + Error, O: TryToTokens<Error = E>, I: TryToTokens<Error = E>> TryToTokens
+    for Attribute<O, I>
+{
+    type Error = E;
+
+    fn try_extend_tokens(&self, buf: &mut TokenStream) -> TtResult<(), E> {
+        match self {
+            Attribute::Outer { contents } => try_extend_quote!(buf, {
+                #[@contents]
+            }),
+            Attribute::Inner { bang, contents } => try_extend_quote!(buf, {
+                #@bang[@contents]
+            }),
+        }
+    }
+}
+
+/// A parsing iterator over inner & outer [attributes](Attribute).
 pub struct Attrs<'a, O, I, A, Fo, Fi> {
     cx: &'a mut Parser,
     args: A,
@@ -285,13 +333,6 @@ where
 //     //     let f: F<A, O> = O::parse_with(parser, args)
 //     // }
 // }
-
-impl<'a, O, I, A: Clone, Fo, Fi> Attrs<'a, O, I, A, Fo, Fi>
-where
-    Fo: FnMut(&mut Parser, A) -> Result<O>,
-    Fi: FnMut(&mut Parser, A) -> Result<I>,
-{
-}
 impl<'a, O, I, A: Clone, Fo, Fi> Iterator for Attrs<'a, O, I, A, Fo, Fi>
 where
     Fo: FnMut(&mut Parser, A) -> Result<O>,
@@ -311,38 +352,57 @@ where
     }
 }
 
-impl<O, I> Parse for Attribute<O, I>
-where
-    O: Parse,
-    I: for<'a> Parse<Args<'a> = O::Args<'a>>,
-{
-    type Args<'a> = O::Args<'a>;
-
-    fn parse_with(cx: &mut Parser, args: Self::Args<'_>) -> Result<Self> {
-        Self::parse_separately(cx, args, O::parse_with, I::parse_with)
-    }
-}
-
-impl<O: ToSpan, I: ToSpan> ToSpan for Attribute<O, I> {
-    fn span(&self) -> Span {
-        match self {
-            Attribute::Outer { contents } => contents.span(),
-            Attribute::Inner { contents, .. } => contents.span(),
+pub trait AttrIterExt<O, I>: Iterator<Item = Attribute<O, I>> + Sized {
+    fn fold_separately<Bo, Bi>(
+        mut self,
+        mut fold_outer: impl FnMut(Bo, O) -> Bo,
+        mut fold_inner: impl FnMut(Bi, I) -> Bi,
+        mut outer_init: Bo,
+        mut inner_init: Bi,
+    ) -> (Bo, Bi) {
+        while let Some(attr) = self.next() {
+            match attr {
+                Attribute::Outer { contents } => outer_init = fold_outer(outer_init, contents),
+                Attribute::Inner { contents, .. } => inner_init = fold_inner(inner_init, contents),
+            }
         }
+        (outer_init, inner_init)
+    }
+
+    fn extracting_inner_with(self, mut extract_inner: impl FnMut(I)) -> impl Iterator<Item = O> {
+        self.filter_map(move |attr| match attr {
+            Attribute::Outer { contents } => Some(contents),
+            Attribute::Inner { contents, .. } => {
+                extract_inner(contents);
+                None
+            }
+        })
+    }
+    fn extracting_outer_with(self, mut extract_outer: impl FnMut(O)) -> impl Iterator<Item = I> {
+        self.filter_map(move |attr| match attr {
+            Attribute::Inner { contents, .. } => Some(contents),
+            Attribute::Outer { contents } => {
+                extract_outer(contents);
+                None
+            }
+        })
+    }
+
+    fn extracting_inner_to(self, inner: &mut impl Extend<I>) -> impl Iterator<Item = O> {
+        self.extracting_inner_with(move |i| inner.extend([i]))
+    }
+    fn extracting_outer_to(self, outer: &mut impl Extend<O>) -> impl Iterator<Item = I> {
+        self.extracting_outer_with(move |o| outer.extend([o]))
     }
 }
 
-impl<O: ToTokens, I: ToTokens> ToTokens for Attribute<O, I> {
-    fn extend_tokens(&self, mut buf: &mut TokenStream) {
-        match self {
-            Attribute::Outer { contents } => extend_quote!(buf <- {
-                #[@contents]
-            }),
-            Attribute::Inner { bang, contents } => extend_quote!(buf <- {
-                #@bang[@contents]
-            }),
-        };
-    }
+impl<O, I, T> AttrIterExt<O, I> for T where T: Iterator<Item = Attribute<O, I>> {}
+
+impl<'a, O, I, A: Clone, Fo, Fi> Attrs<'a, O, I, A, Fo, Fi>
+where
+    Fo: FnMut(&mut Parser, A) -> Result<O>,
+    Fi: FnMut(&mut Parser, A) -> Result<I>,
+{
 }
 
 // pub fn parse_and_fold_attributes_separately<O, I, A: Clone, Bo, Bi>(

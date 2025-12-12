@@ -4,7 +4,6 @@
 #![doc(
     html_favicon_url = "https://raw.githubusercontent.com/soqb/vermouth/trunk/assets/logo-icon.png"
 )]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![allow(clippy::toplevel_ref_arg)]
 #![cfg_attr(
     feature = "unstable-diagnostics-backend",
@@ -27,7 +26,7 @@
 //! [`syn`]: https://crates.io/crates/syn
 //!
 #![cfg_attr(
-    doc,
+    docsrs,
     doc = document_features::document_features!(
         feature_label = r##"<a class="stab portability" id="feature-{feature}" href="#feature-{feature}"><code>{feature}</code></a>"##
     ),
@@ -59,6 +58,15 @@ macro_rules! export_macro {
     };
 }
 
+/// Imports either
+#[cfg_attr(not(feature = "proc-macro2"), doc = "[`proc_macro`] or `proc_macro2`")]
+#[cfg_attr(
+    feature = "proc-macro2",
+    doc = "`proc_macro` or [`proc_macro2`](::proc_macro2)"
+)]
+/// depending on feature flags.
+///
+/// Required as a macro for doc-tests, where crate-private items are not accessible.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! ඞ_declare_test {
@@ -90,6 +98,7 @@ mod error;
 mod ext;
 mod parser;
 mod pat;
+#[cfg(feature = "quote")]
 mod quote;
 mod span;
 pub use self::{error::*, ext::*, parser::*, pat::*, quote::*, span::*};
@@ -103,8 +112,6 @@ pub mod attributes;
 
 #[cfg(test)]
 mod tests {
-    use std::iter;
-
     use proc_macro::{Ident, Literal, Span, TokenStream, TokenTree};
 
     use crate::{
@@ -260,8 +267,11 @@ mod tests {
             7f64
             7.
             "foobar"
+            r#"forbar"#
             c"coobar"
+            cr#"corbar"#
             b"boobar"
+            br#"borbar"#
             'x'
             b'y'
         };
@@ -271,8 +281,11 @@ mod tests {
             tt(Literal::f64_suffixed(7.)),
             tt(Literal::f32_unsuffixed(7.)),
             tt(Literal::string("foobar")),
+            tt(Literal::string("forbar")),
             tt(Literal::c_string(c"coobar")),
+            tt(Literal::c_string(c"corbar")),
             tt(Literal::byte_string(b"boobar")),
+            tt(Literal::byte_string(b"borbar")),
             tt(Literal::character('x')),
             tt(Literal::byte_character(b'y')),
         ]

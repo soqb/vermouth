@@ -6,12 +6,9 @@
 /// ```
 ///
 /// ```
-/// #![allow(unused_must_use)]
 /// // produces: `i say "its problematic, but recoverable"`
 /// // through a hidden `#[must_use]` diagnostic.
-/// //
-/// // without the leading `forbid` attribute,
-/// // this would just be warning, not an error.
+/// #[expect(unused_must_use)]
 /// toy::parrot_diagnostic!(warning = "its problematic, but recoverable");
 /// ```
 pub use toy_macros::parrot_diagnostic;

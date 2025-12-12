@@ -1,203 +1,274 @@
-use std::ffi::CStr;
+//! Compile-time literal parsing for quasi-quoting.
 
-use proc_macro::{Literal, TokenTree};
+use std::{convert::Infallible, ffi::CStr, str::FromStr};
 
-use crate::ctfe;
+use proc_macro::{Literal, TokenStream};
 
-pub struct DelayedLiteral<T> {
-    regime: Regime,
+use crate::{ReparseError, TokensExtend, TryToTokens, TtResult, ctfe};
+
+/// A hacky representation of a partially-parsed literal.
+///
+/// Contains both the CTFE-parsed [`Regime`] of the literal,
+/// as well as the actual value of the literal, as decided by rustc.
+///
+/// Kinda like the following tuple.
+/// ```rust,ignore
+/// (literal, stringify!(literal), Regime::from_str(stringify!(literal)))
+/// ```
+#[derive(Clone, Copy)]
+pub struct DelayedLiteral<T, const REGIME: u8> {
     data: T,
 }
 
-impl<T: LitContents> From<DelayedLiteral<T>> for TokenTree {
-    fn from(delay: DelayedLiteral<T>) -> Self {
-        T::accept(delay.regime, delay.data)
+impl<T: LitContents, const REGIME: u8> DelayedLiteral<T, REGIME> {
+    #[inline]
+    pub fn new(data: T) -> Option<DelayedLiteral<T, REGIME>> {
+        const { Regime::parse(REGIME, T::PARSERS) }.map(|_| DelayedLiteral { data })
     }
 }
 
-pub const fn new_lit<T: LitContents>(str: &'static str, data: T) -> Option<DelayedLiteral<T>> {
-    let Some(regime) = Regime::recognize(str) else {
-        return None;
-    };
+impl<T: LitContents, const REGIME: u8> TryToTokens for DelayedLiteral<T, REGIME> {
+    type Error = Infallible;
 
-    if !regime.any_matches(T::VALID) {
-        return None;
+    #[inline]
+    fn try_extend_tokens(&self, buf: &mut TokenStream) -> TtResult<()> {
+        let resolution = const { Regime::parse(REGIME, T::PARSERS) }.unwrap();
+        buf.push(resolution(self.data));
+        Ok(())
     }
+}
 
-    Some(DelayedLiteral { regime, data })
+pub fn fallback(text: &'static str, buf: &mut TokenStream) -> TtResult<()> {
+    let tt = TokenStream::from_str(text).map_err(move |lex| ReparseError::from_lit(lex, text))?;
+    buf.extend(tt);
+    Ok(())
 }
 
 /// The kind of literal a stringified token represents.
 #[derive(Clone, Copy)]
+#[repr(u8)]
 pub enum Regime {
+    Unknown,
     String,
     CString,
     ByteString,
     Character,
     ByteCharacter,
-    Int { suffixed: bool },
-    Float { suffixed: bool },
+    Int,
+    IntSuffixed,
+    Float,
+    FloatSuffixed,
 }
 
 impl Regime {
-    const fn recognize_suffixed_numeric(s: &'static str) -> Option<Regime> {
-        if let Some(suffix) = ctfe::str_lastn(s, 5) {
-            const_str_match!(suffix; {
-                "usize" | "isize" => return Some(Regime::Int { suffixed: true }),
+    const fn recognize_suffixed_int(s: &[u8]) -> bool {
+        if let Some(suffix) = ctfe::bytes_lastn(s, 5) {
+            const_bytes_match!(suffix; {
+                b"usize" | b"isize" => return true,
             })
         }
 
-        if let Some(suffix) = ctfe::str_lastn(s, 4) {
-            const_str_match!(suffix; {
-                "u128" | "i128" => return Some(Regime::Int { suffixed: true }),
+        if let Some(suffix) = ctfe::bytes_lastn(s, 4) {
+            const_bytes_match!(suffix; {
+                b"u128" | b"i128" => return true,
             })
         }
 
-        if let Some(suffix) = ctfe::str_lastn(s, 3) {
-            const_str_match!(suffix; {
-                "u64" | "i64" | "u32" | "i32" | "u16" | "i16" => return Some(Regime::Int { suffixed: true }),
-                "f64" | "f32" => return Some(Regime::Float { suffixed: true }),
+        if let Some(suffix) = ctfe::bytes_lastn(s, 3) {
+            const_bytes_match!(suffix; {
+                b"u64" | b"i64" | b"u32" | b"i32" | b"u16" | b"i16" => return true,
             })
         }
 
-        if let Some(suffix) = ctfe::str_lastn(s, 2) {
-            const_str_match!(suffix; {
-                "u8" | "i8" => return Some(Regime::Int { suffixed: true }),
+        if let Some(suffix) = ctfe::bytes_lastn(s, 2) {
+            const_bytes_match!(suffix; {
+                b"u8" | b"i8" => return true,
             })
-        }
-
-        None
-    }
-
-    pub const fn recognize(s: &'static str) -> Option<Regime> {
-        const fn wing_string_prefix(s: &str, p: u8) -> Option<&str> {
-            if let Some((prefix, s)) = ctfe::split_around(s, p)
-                && let Some(..) = ctfe::rsplit_around(s, p)
-            {
-                Some(prefix)
-            } else {
-                None
-            }
-        }
-
-        if let Some(prefix) = wing_string_prefix(s, b'"') {
-            // string literal:
-            const_str_match!(prefix; {
-                "b" | "b#" => Some(Regime::ByteString),
-                "c" | "c#" => Some(Regime::CString),
-                "" => Some(Regime::String),
-                _ => None,
-            })
-        } else if let Some(prefix) = wing_string_prefix(s, b'\'') {
-            // char literal:
-            const_str_match!(prefix; {
-                "b" => Some(Regime::ByteCharacter),
-                "" => Some(Regime::Character),
-                _ => None,
-            })
-        } else if let Some(regime) = Regime::recognize_suffixed_numeric(s) {
-            Some(regime)
-        } else if ctfe::bytes_contain(s.as_bytes(), b'.') {
-            Some(Regime::Float { suffixed: false })
-        } else {
-            Some(Regime::Int { suffixed: false })
-        }
-    }
-
-    pub const fn eq(self, other: Regime) -> bool {
-        match (self, other) {
-            (Regime::String, Regime::String) => true,
-            (Regime::CString, Regime::CString) => true,
-            (Regime::ByteString, Regime::ByteString) => true,
-            (Regime::Character, Regime::Character) => true,
-            (Regime::ByteCharacter, Regime::ByteCharacter) => true,
-            (Regime::Int { suffixed: a }, Regime::Int { suffixed: b }) => a == b,
-            (Regime::Float { suffixed: a }, Regime::Float { suffixed: b }) => a == b,
-            _ => false,
-        }
-    }
-
-    pub const fn any_matches(self, candidates: &'static [Regime]) -> bool {
-        let mut i = 0;
-        while i < candidates.len() {
-            if self.eq(candidates[i]) {
-                return true;
-            }
-            i += 1;
         }
 
         false
     }
+
+    const fn recognize_suffixed_float(s: &[u8]) -> bool {
+        if let Some(suffix) = ctfe::bytes_lastn(s, 3) {
+            const_bytes_match!(suffix; {
+                b"f64" | b"f32" => return true,
+            })
+        }
+
+        false
+    }
+    const fn recognize_suffixed_number(s: &[u8]) -> Regime {
+        if Regime::recognize_suffixed_int(s) {
+            Regime::IntSuffixed
+        } else if Regime::recognize_suffixed_float(s) {
+            Regime::FloatSuffixed
+        } else {
+            Regime::Int
+        }
+    }
+
+    pub const fn recognize(input: &str) -> Regime {
+        let mut s = input.as_bytes();
+        macro_rules! parse_byte {
+            ($($arm:pat $(if $g:expr)? => $ex:expr,)*) => {{
+                let (s2, c) = match s.split_first() {
+                    Some((c, s)) => {
+                        (s, Some(c))
+                    },
+                    None => (s, None),
+                };
+
+                #[allow(unreachable_patterns)]
+                return match c {
+                    $($arm $(if $g)? => {
+                        let _x = $ex;
+                        #[allow(unreachable_code, unused_assignments)]
+                        {
+                            s = s2;
+                            _x
+                        }
+                    })*
+                    _ => return Regime::Unknown,
+                };
+            }};
+        }
+
+        // piss-simple parser tree.
+        parse_byte! {
+            Some(b'0') => parse_byte! {
+                Some(b'x' | b'b' | b'o') => Regime::recognize_suffixed_number(s),
+                _ if ctfe::bytes_any(s, b'.') => if Regime::recognize_suffixed_float(s)  { Regime::FloatSuffixed } else { Regime::Float },
+                _ => Regime::recognize_suffixed_number(s),
+            },
+            Some(b'1'..=b'9') => parse_byte! {
+                _ if ctfe::bytes_any(s, b'.') => if Regime::recognize_suffixed_float(s)  { Regime::FloatSuffixed } else { Regime::Float },
+                _ => Regime::recognize_suffixed_number(s),
+            },
+            Some(b'b') => parse_byte! {
+                Some(b'"') => Regime::ByteString,
+                Some(b'\'') => Regime::ByteCharacter,
+                Some(b'r') if ctfe::bytes_any(s, b'"') => Regime::ByteString,
+            },
+            Some(b'c') => parse_byte! {
+                Some(b'"') => Regime::CString,
+                Some(b'r') if ctfe::bytes_any(s, b'"') => Regime::CString,
+            },
+            Some(b'"') => Regime::String,
+            Some(b'\'') => Regime::Character,
+            Some(b'r') if ctfe::bytes_any(s, b'"') => Regime::String,
+        }
+
+        // match s.as_bytes().split_first() {
+        //     Some(b'0'..=b'9') => match ,
+        //     Some(b'b') => Som,
+        //     None => todo!(),
+        // }
+
+        // const fn wing_string(s: &str, p: u8) -> Option<(&str, &str)> {
+        //     if let Some((prefix, s2)) = ctfe::split_around(s, p)
+        //         && let Some((inner, _suffix)) = ctfe::rsplit_around(s2, p)
+        //     {
+        //         Some((prefix, inner))
+        //     } else {
+        //         None
+        //     }
+        // }
+
+        // if let Some((prefix, inner)) = wing_string(s, b'#')
+        //     && let Some(_) = wing_string(inner, b'"')
+        // {
+        //     const_str_match!(prefix; {
+        //         "br" => Some(Regime::ByteString),
+        //         "cr" => Some(Regime::CString),
+        //         "r" => Some(Regime::String),
+        //         _ => None,
+        //     })
+        // } else if let Some((prefix, _)) = wing_string(s, b'"') {
+        //     // string literal:
+        //     const_str_match!(prefix; {
+        //         "b" => Some(Regime::ByteString),
+        //         "c" => Some(Regime::CString),
+        //         "" => Some(Regime::String),
+        //         _ => None,
+        //     })
+        // } else if let Some((prefix, _)) = wing_string(s, b'\'') {
+        //     // char literal:
+        //     const_str_match!(prefix; {
+        //         "b" => Some(Regime::ByteCharacter),
+        //         "" => Some(Regime::Character),
+        //         _ => None,
+        //     })
+        // } else if let Some(regime) = Regime::recognize_suffixed_numeric(s) {
+        //     Some(regime)
+        // } else if ctfe::bytes_contain(s.as_bytes(), b'.') {
+        //     Some(Regime::Float { suffixed: false })
+        // } else {
+        //     Some(Regime::Int { suffixed: false })
+        // }
+    }
+
+    pub const fn parse<T>(
+        repr: u8,
+        candidates: &'static [LitParser<T>],
+    ) -> Option<fn(T) -> Literal> {
+        if repr == Regime::Unknown as u8 {
+            return None;
+        }
+
+        let mut i = 0;
+        while i < candidates.len() {
+            let (regime, resolution) = candidates[i];
+            if regime as u8 == repr {
+                return Some(resolution);
+            }
+            i += 1;
+        }
+
+        None
+    }
 }
 
-pub trait LitContents: Copy {
-    const VALID: &[Regime];
-    fn accept(regime: Regime, data: Self) -> TokenTree;
+type LitParser<T> = (Regime, fn(T) -> Literal);
+
+macro_rules! lit_parsers {
+    ($( $reg:expr => $ctor:ident ),* $(,)?) => {
+        &[$( ($reg, |x| Literal::$ctor(x)), )*]
+    };
+}
+
+pub trait LitContents: Copy + 'static {
+    const PARSERS: &[LitParser<Self>];
 }
 
 impl LitContents for char {
-    const VALID: &[Regime] = &[Regime::Character];
-    fn accept(regime: Regime, data: char) -> TokenTree {
-        match regime {
-            Regime::Character => Literal::character(data).into(),
-            _ => unreachable!(),
-        }
-    }
+    const PARSERS: &[LitParser<Self>] = lit_parsers![Regime::Character => character];
 }
 
 impl LitContents for &'static str {
-    const VALID: &[Regime] = &[Regime::String];
-    fn accept(regime: Regime, data: &'static str) -> TokenTree {
-        match regime {
-            Regime::String => Literal::string(data).into(),
-            _ => unreachable!(),
-        }
-    }
+    const PARSERS: &[LitParser<Self>] = lit_parsers![Regime::String => string];
 }
+
+// impl<const N: usize> LitContents for &'static [u8; N] {
+//     const PARSERS: &[(Regime, fn(Self) -> Literal)] = &[(Regime::ByteString, Literal::byte_string)];
+// }
 
 impl<const N: usize> LitContents for &'static [u8; N] {
-    const VALID: &[Regime] = &[Regime::ByteString];
-    fn accept(regime: Regime, data: &'static [u8; N]) -> TokenTree {
-        match regime {
-            Regime::ByteString => Literal::byte_string(data).into(),
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl LitContents for &'static [u8] {
-    const VALID: &[Regime] = &[Regime::ByteString];
-    fn accept(regime: Regime, data: &'static [u8]) -> TokenTree {
-        match regime {
-            Regime::ByteString => Literal::byte_string(data).into(),
-            _ => unreachable!(),
-        }
-    }
+    const PARSERS: &[LitParser<Self>] = lit_parsers![Regime::ByteString => byte_string];
 }
 
 impl LitContents for &'static CStr {
-    const VALID: &[Regime] = &[Regime::CString];
-    fn accept(regime: Regime, data: &'static CStr) -> TokenTree {
-        match regime {
-            Regime::CString => Literal::c_string(data).into(),
-            _ => unreachable!(),
-        }
-    }
+    const PARSERS: &[LitParser<Self>] = lit_parsers![Regime::CString => c_string];
 }
 
 macro_rules! impl_lit_contents_for_int {
     ($($ty:ident($suff:ident, $unsuff:ident);)*) => {
         $(
             impl LitContents for $ty {
-                const VALID: &[Regime] = &[Regime::Int { suffixed: true }, Regime::Int { suffixed: false }];
-                fn accept(regime: Regime, n: Self) -> TokenTree {
-                    let tt = match regime {
-                        Regime::Int { suffixed: true } => Literal::$suff(n),
-                        Regime::Int { suffixed: false } => Literal::$unsuff(n),
-                        _ => unreachable!(),
-                    };
-                    tt.into()
-                }
+                const PARSERS: &[LitParser<Self>] = lit_parsers![
+                    Regime::Int => $unsuff,
+                    Regime::IntSuffixed => $suff,
+                ];
             }
         )*
     };
@@ -219,50 +290,23 @@ impl_lit_contents_for_int! {
 
 // manual impl because of `Regime::ByteCharacter`:
 impl LitContents for u8 {
-    const VALID: &[Regime] = &[
-        Regime::ByteCharacter,
-        Regime::Int { suffixed: true },
-        Regime::Int { suffixed: false },
+    const PARSERS: &[LitParser<Self>] = lit_parsers![
+        Regime::ByteCharacter => byte_character,
+        Regime::Int => u8_unsuffixed,
+        Regime::IntSuffixed => u8_suffixed,
     ];
-    fn accept(regime: Regime, n: u8) -> TokenTree {
-        let tt = match regime {
-            Regime::ByteCharacter => Literal::byte_character(n),
-            Regime::Int { suffixed: true } => Literal::u8_suffixed(n),
-            Regime::Int { suffixed: false } => Literal::u8_unsuffixed(n),
-            _ => unreachable!(),
-        };
-        tt.into()
-    }
 }
 
 impl LitContents for f32 {
-    const VALID: &[Regime] = &[
-        Regime::Float { suffixed: true },
-        Regime::Float { suffixed: false },
+    const PARSERS: &[LitParser<Self>] = lit_parsers![
+        Regime::Float => f32_unsuffixed,
+        Regime::FloatSuffixed => f32_suffixed,
     ];
-
-    fn accept(regime: Regime, f: f32) -> TokenTree {
-        let tt = match regime {
-            Regime::Float { suffixed: true } => Literal::f32_suffixed(f),
-            Regime::Float { suffixed: false } => Literal::f32_unsuffixed(f),
-            _ => unreachable!(),
-        };
-        tt.into()
-    }
 }
 
 impl LitContents for f64 {
-    const VALID: &[Regime] = &[
-        Regime::Float { suffixed: true },
-        Regime::Float { suffixed: false },
+    const PARSERS: &[LitParser<Self>] = lit_parsers![
+        Regime::Float => f64_unsuffixed,
+        Regime::FloatSuffixed => f64_suffixed,
     ];
-
-    fn accept(regime: Regime, f: f64) -> TokenTree {
-        let tt = match regime {
-            Regime::Float { suffixed: true } => Literal::f64_suffixed(f),
-            Regime::Float { suffixed: false } => Literal::f64_unsuffixed(f),
-            _ => unreachable!(),
-        };
-        tt.into()
-    }
 }

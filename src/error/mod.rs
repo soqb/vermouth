@@ -350,7 +350,10 @@ impl PartialEq for DiagnosticKind {
 /// In stable Rust (as of version 1.80),
 /// there is no built-in support for emitting diagnostics other than compile errors.
 /// However, by enabling the `"warnings"` feature, `vermouth` will provide
-/// best effort support for custom [warnings] by carefully emitting `#[must_use]` attributes.
+/// best effort support for custom
+#[cfg_attr(not(feature = "warnings"), doc = "warnings")]
+#[cfg_attr(feature = "warnings", doc = "[warnings](DiagnosticLevel::Warning)")]
+/// by carefully emitting `#[must_use]` attributes.
 ///
 /// If using a nightly toolchain, enabling the
 /// <a class="stab portability" href="index.html#feature-unstable-diagnostics-backend"><code>unstable-diagnostics-backend</code></a>
@@ -408,7 +411,7 @@ impl Diagnostic {
         span: impl ToSpan,
         msg: impl fmt::Display + fmt::Debug + 'static,
     ) -> Diagnostic {
-        Self {
+        Diagnostic {
             kind: DiagnosticKind::Custom(CustomDiagnostic {
                 level,
                 span: span.span(),
@@ -417,7 +420,7 @@ impl Diagnostic {
         }
     }
 
-    /// Combines several errors in a single object.
+    /// Combines several diagnostics into one.
     ///
     /// # Reporting
     ///

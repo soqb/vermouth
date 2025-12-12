@@ -5,7 +5,7 @@ edition = "2024"
 description = "a new kind of parser for procedural macros"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/soqb/vermouth"
-rust-version = "1.89"
+rust-version = "1.92"
 exclude = ["assets/", "examples/"]
 
 [workspace]
@@ -22,7 +22,7 @@ version = ">=1, <=1.0.86"
 optional = true
 
 [features]
-default = ["attributes"]
+default = ["quote", "attributes"]
 
 # NB: we use the `document_features` crate.
 #! ## Stable Features
@@ -31,11 +31,18 @@ default = ["attributes"]
 attributes = []
 ## Enables emitting diagnostic warnings through the `vermouth::Diagnostic` API.
 warnings = []
-## Enables the complete suite of parsing utilities. This implies every other stable feature except
-## <a class="stab portability" href="#feature-proc-macro2"><code>proc-macro2</code></a>.
-complete = ["attributes", "warnings"]
+## Enables the complete suite of parsing utilities.
+complete = ["quote", "attributes", "warnings"]
+## Enables [quasi quoting](crate::try_quote).
+quote = []
+## Ensures (where possible) that quoted tokens are emitted verbatim, at the cost of performance.
+##
+## For example, this disables literal preprocessing, so `r##"foobar"##` does not become `"foobar"`.
+## Note that integer literal suffixes are always preseved.
+quote-verbatim = []
 ## Rewires this crate to build on top of the [`proc-macro2`] crate,
 ## instead of the default, officially supported `proc_macro` crate.
+##
 ## This feature should be enabled with caution, and it is considered a major breaking change to do so.
 ## Due to the risks of compounding additive features across dependencies,
 ## it can be problematic to enable this feature in a library, since it may break other dependents of this crate.

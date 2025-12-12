@@ -16,23 +16,7 @@ pub const fn split_around(str: &str, p: u8) -> Option<(&str, &str)> {
     None
 }
 
-pub const fn rsplit_around(str: &str, p: u8) -> Option<(&str, &str)> {
-    let mut i = str.len();
-    while i > 0 {
-        i -= 1;
-
-        if str.is_char_boundary(i) {
-            if str.as_bytes()[i] == p {
-                let (a, b) = str.split_at(i);
-                return Some((a, b.split_at(1).1));
-            }
-        }
-    }
-
-    None
-}
-
-pub const fn bytes_contain(bytes: &[u8], p: u8) -> bool {
+pub const fn bytes_any(bytes: &[u8], p: u8) -> bool {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == p {
@@ -62,7 +46,7 @@ pub const fn bytes_eq(lhs: &[u8], rhs: &[u8]) -> bool {
     true
 }
 
-pub const fn str_lastn(s: &str, n: usize) -> Option<&str> {
+pub const fn bytes_lastn(s: &[u8], n: usize) -> Option<&[u8]> {
     let Some(m) = s.len().checked_sub(n) else {
         return None;
     };
@@ -70,11 +54,11 @@ pub const fn str_lastn(s: &str, n: usize) -> Option<&str> {
     Some(s.split_at(m).1)
 }
 
-macro_rules! const_str_match {
+macro_rules! const_bytes_match {
     ($str:expr; { $($($arm:literal)|+ => $body:expr),* $(, _ => $fallback:expr)? $(,)? }) => {
         if false { unreachable!() }
         $(
-            else if $($crate::ctfe::bytes_eq($str.as_bytes(), $arm.as_bytes()))||+ {
+            else if $($crate::ctfe::bytes_eq($str, $arm))||+ {
                 $body
             }
         )*
