@@ -94,6 +94,7 @@ macro_rules! ඞ_declare_test {
 #[macro_use]
 mod ctfe;
 
+mod buf;
 mod error;
 mod ext;
 mod parser;
@@ -101,7 +102,8 @@ mod pat;
 #[cfg(feature = "quote")]
 mod quote;
 mod span;
-pub use self::{error::*, ext::*, parser::*, pat::*, quote::*, span::*};
+mod to_tokens;
+pub use self::{buf::*, error::*, ext::*, parser::*, pat::*, quote::*, span::*, to_tokens::*};
 
 #[doc(hidden)]
 #[path = "macro_exports/mod.rs"]
@@ -124,7 +126,7 @@ mod tests {
     #[test]
     fn parsing() {
         let tokens = quote! { a + b == c };
-        let ref mut cx = Parser::new(tokens, Span::call_site());
+        let ref mut cx = Parser::new(tokens.into(), Span::call_site());
         assert_eq!(
             cx.eat_ident().map(Spanned::from).map(|s| s == "a"),
             Ok(true),
@@ -291,14 +293,14 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        assert_streams_match(quoted, manual);
+        assert_streams_match(quoted.into(), manual);
     }
 
     #[test]
     #[cfg(feature = "attributes")]
     fn attributes() {
         let tokens = quote! { #[foo] #![bar] };
-        let ref mut cx = Parser::new(tokens, Span::call_site());
+        let ref mut cx = Parser::new(tokens.into(), Span::call_site());
 
         struct Foo;
         struct Bar;

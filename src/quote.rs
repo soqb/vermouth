@@ -73,7 +73,7 @@ macro_rules! bail_specialized {
 /// - In any other context, we panic by unwrapping.
 #[macro_export]
 macro_rules! quote {
-    {} => { $crate::ඞ_macro_exports::proc_macro::TokenStream::new() };
+    {} => { $crate::ඞ_macro_exports::proc_macro::TokenBuf::new() };
     {$($t:tt)*} => {{
         let tokens = $crate::try_quote! { $($t)* };
         match tokens {
@@ -103,7 +103,7 @@ macro_rules! try_extend_quote {
 
 /// Returns an object implementing [`TryToTokens`] which represents some quasi-quoted Rust source.
 ///
-/// See [`quote`](crate::quote) for the details of quasi-quoting syntax.
+/// See [`try_quote`] for the details of quasi-quoting syntax.
 #[macro_export]
 macro_rules! delay_quote {
     ($($t:tt)*) => {
@@ -124,7 +124,7 @@ macro_rules! ඞ_macro_inline_quote_impl {
         };
     };
     ($buf:ident $s:lifetime $($t:tt)*) => {
-        let mut $buf = proc_macro::TokenStream::new();
+        let mut $buf = $crate::TokenBuf::new();
         let _buf = &mut $buf;
         $crate::ඞ_macro_extend_quote_impl! { _buf $s $($t)* };
     };

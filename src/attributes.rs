@@ -5,8 +5,8 @@ use std::{convert::Infallible, error::Error, marker::PhantomData};
 use proc_macro::{Delimiter, Punct, Span, TokenStream, TokenTree};
 
 use crate::{
-    Diagnostic, DiagnosticLevel, Eos, Expected, Parse, Parser, Result, ToSpan, TokenTreeExt,
-    TryToTokens, TtResult, delay_quote, quote, try_extend_quote,
+    Diagnostic, DiagnosticLevel, Eos, Expected, Parse, Parser, Result, ToSpan, TokenBuf,
+    TokenTreeExt, TryToTokens, TtResult, delay_quote, quote, try_extend_quote,
 };
 
 /// An attribute which may be [`cfg`].
@@ -40,7 +40,7 @@ impl<T: Parse> Parse for CfgLeaf<T> {
 impl<T: TryToTokens> TryToTokens for CfgLeaf<T> {
     type Error = T::Error;
 
-    fn try_extend_tokens(&self, buf: &mut TokenStream) -> TtResult<(), T::Error> {
+    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<(), T::Error> {
         match self {
             CfgLeaf::Cfg { meta } => try_extend_quote!(buf, { cfg(@meta) }),
             CfgLeaf::Other(c) => c.try_extend_tokens(buf),
@@ -95,7 +95,7 @@ impl<T: Parse> Parse for Cfgable<T> {
 fn cfgable_extend_tokens<T: TryToTokens>(
     metas: &[TokenStream],
     inner: &T,
-    buf: &mut TokenStream,
+    buf: &mut TokenBuf,
 ) -> TtResult<(), T::Error> {
     // we iterate in reverse, building up everything that `cfg_attr` parameterises in a single step.
     let Some((last_meta, rest)) = metas.split_last() else {
@@ -113,7 +113,7 @@ fn cfgable_extend_tokens<T: TryToTokens>(
 }
 
 impl<T> Cfgable<T> {
-    pub fn try_extend_tokens_as_cfg(&self, buf: &mut TokenStream) -> TtResult<()> {
+    pub fn try_extend_tokens_as_cfg(&self, buf: &mut TokenBuf) -> TtResult<()> {
         let Some((last, rest)) = self.cfg_attr_metas.split_last() else {
             return Ok(());
         };
@@ -124,8 +124,8 @@ impl<T> Cfgable<T> {
     /// Reparameterises a `cfg_attr` attribute into a `cfg`.
     ///
     /// For example, `cfg_attr(foo, cfg_attr(bar, baz))` becomes `cfg_attr(foo, cfg(bar))`.
-    pub fn try_to_tokens_as_cfg(&self) -> TtResult<TokenStream> {
-        let mut buf = TokenStream::new();
+    pub fn try_to_tokens_as_cfg(&self) -> TtResult<TokenBuf> {
+        let mut buf = TokenBuf::new();
         self.try_extend_tokens_as_cfg(&mut buf)?;
         Ok(buf)
     }
@@ -134,7 +134,7 @@ impl<T> Cfgable<T> {
 impl<T: TryToTokens> TryToTokens for Cfgable<T> {
     type Error = T::Error;
 
-    fn try_extend_tokens(&self, buf: &mut TokenStream) -> TtResult<(), Self::Error> {
+    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<(), Self::Error> {
         cfgable_extend_tokens(&self.cfg_attr_metas, &self.inner, buf)
     }
 }
@@ -240,7 +240,7 @@ impl<E: From<Infallible> + Error, O: TryToTokens<Error = E>, I: TryToTokens<Erro
 {
     type Error = E;
 
-    fn try_extend_tokens(&self, buf: &mut TokenStream) -> TtResult<(), E> {
+    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<(), E> {
         match self {
             Attribute::Outer { contents } => try_extend_quote!(buf, {
                 #[@contents]

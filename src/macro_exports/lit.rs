@@ -4,7 +4,7 @@ use std::{convert::Infallible, ffi::CStr, str::FromStr};
 
 use proc_macro::{Literal, TokenStream};
 
-use crate::{ReparseError, TokensExtend, TryToTokens, TtResult, ctfe};
+use crate::{ReparseError, TokenBuf, TryToTokens, TtResult, ctfe};
 
 /// A hacky representation of a partially-parsed literal.
 ///
@@ -31,14 +31,14 @@ impl<T: LitContents, const REGIME: u8> TryToTokens for DelayedLiteral<T, REGIME>
     type Error = Infallible;
 
     #[inline]
-    fn try_extend_tokens(&self, buf: &mut TokenStream) -> TtResult<()> {
+    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<()> {
         let resolution = const { Regime::parse(REGIME, T::PARSERS) }.unwrap();
         buf.push(resolution(self.data));
         Ok(())
     }
 }
 
-pub fn fallback(text: &'static str, buf: &mut TokenStream) -> TtResult<()> {
+pub fn fallback(text: &'static str, buf: &mut TokenBuf) -> TtResult<()> {
     let tt = TokenStream::from_str(text).map_err(move |lex| ReparseError::from_lit(lex, text))?;
     buf.extend(tt);
     Ok(())

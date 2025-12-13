@@ -156,7 +156,7 @@ impl From<Group> for Parser {
 }
 
 /// A simple parser for Rust source which traverses [`TokenTree`]s.
-///
+// FIXME: go back to parameterising by iterator type!
 pub struct Parser {
     stream: Stream<TokenTree, proc_macro::token_stream::IntoIter>,
     eos_span: Span,
