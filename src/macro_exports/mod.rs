@@ -1,6 +1,6 @@
 //! The domain-specific library for this crate's macros (especially [`try_quote`](crate::try_quote)).
 
-use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream};
+use proc_macro::{Ident, Punct, Spacing, Span, TokenStream};
 
 use crate::{ReparseError, TokenBuf, TryToTokens, TtError, TtResult, ctfe};
 use std::{convert::Infallible, error::Error, str::FromStr};
@@ -41,9 +41,9 @@ pub fn try_to_tokens<T: TryToTokens>(t: T) -> TtResult<TokenBuf, T::Error> {
 }
 
 #[inline(never)]
-pub fn try_push_punct(buf: &mut TokenBuf, chars: &[char]) -> TtResult<(), Infallible> {
+pub fn push_punct(buf: &mut TokenBuf, chars: &[char]) {
     let Some((&last, rest)) = chars.split_last() else {
-        return Ok(());
+        return;
     };
 
     for &c in rest {
@@ -51,12 +51,6 @@ pub fn try_push_punct(buf: &mut TokenBuf, chars: &[char]) -> TtResult<(), Infall
     }
 
     buf.push(Punct::new(last, Spacing::Alone));
-
-    Ok(())
-}
-
-pub fn push_group(buf: &mut TokenBuf, stream: impl Into<TokenStream>, delimiter: Delimiter) {
-    buf.push(Group::new(delimiter, stream.into()));
 }
 
 pub const fn parse_ident(str: &'static str) -> impl TryToTokens<Error = Infallible> + Copy {

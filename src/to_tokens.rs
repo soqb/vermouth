@@ -140,7 +140,7 @@ impl TryToTokens for TokenBuf {
     type Error = Infallible;
 
     fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<()> {
-        buf.extend(self.clone());
+        buf.concat(self);
         Ok(())
     }
 

@@ -13,6 +13,7 @@
         proc_macro_diagnostic,
     )
 )]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! _Fortification against [sin][`syn`]._
 //! A new kind of parser for procedural macros.
@@ -26,7 +27,7 @@
 //! [`syn`]: https://crates.io/crates/syn
 //!
 #![cfg_attr(
-    docsrs,
+    feature = "document-features",
     doc = document_features::document_features!(
         feature_label = r##"<a class="stab portability" id="feature-{feature}" href="#feature-{feature}"><code>{feature}</code></a>"##
     ),
@@ -43,20 +44,20 @@ compile_error!(
     due to limitations in the implementation of `proc-macro2`"
 );
 
-/// A hygiene-exploiting hack to allow macros to be exported at non-root paths.
-macro_rules! export_macro {
-    (#[unused_name($unused:ident)] $(#[$attr:meta])* macro_rules! $name:ident { $($t:tt)* }) => {
-        $(#[$attr])*
-        #[macro_export]
-        #[doc(hidden)]
-        macro_rules! $unused {
-            $($t)*
-        }
+// /// A hygiene-exploiting hack to allow macros to be exported at non-root paths.
+// macro_rules! export_macro {
+//     (#[unused_name($unused:ident)] $(#[$attr:meta])* macro_rules! $name:ident { $($t:tt)* }) => {
+//         $(#[$attr])*
+//         #[macro_export]
+//         #[doc(hidden)]
+//         macro_rules! $unused {
+//             $($t)*
+//         }
 
-        #[doc(inline)]
-        pub use $unused as $name;
-    };
-}
+//         #[doc(inline)]
+//         pub use $unused as $name;
+//     };
+// }
 
 /// Imports either
 #[cfg_attr(not(feature = "proc-macro2"), doc = "[`proc_macro`] or `proc_macro2`")]
@@ -103,7 +104,11 @@ mod pat;
 mod quote;
 mod span;
 mod to_tokens;
-pub use self::{buf::*, error::*, ext::*, parser::*, pat::*, quote::*, span::*, to_tokens::*};
+
+#[cfg(feature = "quote")]
+pub use quote::*;
+
+pub use self::{buf::*, error::*, ext::*, parser::*, pat::*, span::*, to_tokens::*};
 
 #[doc(hidden)]
 #[path = "macro_exports/mod.rs"]

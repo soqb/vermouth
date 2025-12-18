@@ -12,8 +12,8 @@ exclude = ["assets/", "examples/"]
 members = ["examples/toy", "examples/toy/macros"]
 
 [dependencies]
-document-features = "0.2.10"
 smallvec = { version = "1.13.2", features = ["union"] }
+document-features = { version = "0.2.10", optional = true }
 
 [dependencies.proc-macro2]
 # we lock the version to a range since there's no tangible guarantee
@@ -57,12 +57,10 @@ proc-macro2 = ["dep:proc-macro2"]
 ## feature for higher quality diagnostics.
 unstable-diagnostics-backend = []
 
-# enable this in your r-a config
-# please, please, please do not enable this during compilation.
-rust-analyzer-hack = []
+document-features = ["dep:document-features"]
 
 [package.metadata.docs.rs]
-features = ["complete"]
+features = ["complete", "document-features"]
 
 [package.metadata.cargo-all-features]
 skip_feature_sets = [

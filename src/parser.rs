@@ -174,7 +174,7 @@ impl Parser {
         let len = stream.clone().into_iter().count();
         Self {
             stream: Stream::with_capacity(stream.into_iter(), len as u32),
-            eos_span: parent_span,
+            eos_span: parent_span.end(),
             diag_buf: Vec::new(),
         }
     }
