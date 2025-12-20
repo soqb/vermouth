@@ -27,7 +27,7 @@
 //! [`syn`]: https://crates.io/crates/syn
 //!
 #![cfg_attr(
-    feature = "document-features",
+    feature = "internal-document-features",
     doc = document_features::document_features!(
         feature_label = r##"<a class="stab portability" id="feature-{feature}" href="#feature-{feature}"><code>{feature}</code></a>"##
     ),

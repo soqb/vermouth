@@ -1,6 +1,6 @@
 use std::{convert::Infallible, error::Error, fmt};
 
-use proc_macro::{Group, Ident, Literal, Punct, TokenStream};
+use proc_macro::{Group, Ident, Literal, Punct, Spacing, TokenStream};
 
 use crate::TokenBuf;
 
@@ -224,6 +224,20 @@ impl<T: TryToTokens> TryToTokens for Option<T> {
         } else {
             Ok(TokenBuf::new())
         }
+    }
+}
+
+/// Evaluates to `@`. Useful for escaping.
+///
+/// See [`quote`](crate::quote#escaping-) for use cases.
+pub struct YouKnowWhatIMean;
+
+impl TryToTokens for YouKnowWhatIMean {
+    type Error = Infallible;
+
+    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<()> {
+        buf.push(Punct::new('@', Spacing::Alone));
+        Ok(())
     }
 }
 

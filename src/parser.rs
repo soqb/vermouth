@@ -174,7 +174,11 @@ impl Parser {
         let len = stream.clone().into_iter().count();
         Self {
             stream: Stream::with_capacity(stream.into_iter(), len as u32),
+            #[cfg(not(feature = "proc-macro2"))]
             eos_span: parent_span.end(),
+            #[cfg(feature = "proc-macro2")]
+            // you'd fucking think it were possible. wouldn't you..
+            eos_span: parent_span,
             diag_buf: Vec::new(),
         }
     }
