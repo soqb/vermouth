@@ -2,7 +2,7 @@
 
 use std::{error::Error, marker::PhantomData};
 
-use crate::{TokenBuf, TryToTokens, TtError, TtResult};
+use crate::{TokenQueue, TryToTokens, TtError, TtResult};
 
 use super::lit::{self, DelayedLiteral, LitContents};
 
@@ -31,7 +31,7 @@ pub trait SpecLiteralQuote: Sized {
         self,
         datum: &Self::Datum,
         text: &'static str,
-        buf: &mut TokenBuf,
+        buf: &mut TokenQueue,
     ) -> TtResult<()>;
 }
 
@@ -43,7 +43,7 @@ impl<T: LitContents> SpecLiteralQuote for Spec<T> {
         self,
         &datum: &T,
         text: &'static str,
-        buf: &mut TokenBuf,
+        buf: &mut TokenQueue,
     ) -> TtResult<()> {
         match DelayedLiteral::<T, REGIME>::new(datum) {
             Some(l) => l.try_extend_tokens(buf),
@@ -61,7 +61,7 @@ impl<T> SpecLiteralQuote for &Spec<T> {
         self,
         _: &T,
         text: &'static str,
-        buf: &mut TokenBuf,
+        buf: &mut TokenQueue,
     ) -> TtResult<()> {
         lit::fallback(text, buf)
     }

@@ -2,7 +2,7 @@ use std::{convert::Infallible, error::Error, fmt};
 
 use proc_macro::{Group, Ident, Literal, Punct, Spacing, TokenStream};
 
-use crate::TokenBuf;
+use crate::TokenQueue;
 
 /// An error representing a failed reparse.
 #[derive(Debug)]
@@ -94,27 +94,30 @@ pub trait TryToTokens {
     type Error: From<Infallible> + Error;
 
     /// Analagous to [`Iterator::size_hint`].
-    fn token_size_hint(&self) -> (usize, Option<usize>) {
+    ///
+    /// Owing to the lazy design of [`TokenQueue`],
+    /// this is the number of "commands" to push, rather than the raw token count,
+    /// which is estimated by [`TokenQueue::token_size_hint`].
+    fn queue_size_hint(&self) -> (usize, Option<usize>) {
         (0, None)
     }
 
     /// Extends an existing token buffer with the contents of a value.
-    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<(), Self::Error>;
+    fn try_extend_tokens(&self, q: &mut TokenQueue) -> TtResult<(), Self::Error>;
 
     /// Builds a [`TokenStream`] from a value.
     #[inline]
-    fn try_to_tokens(&self) -> TtResult<TokenBuf, Self::Error> {
-        let mut buf = TokenBuf::new();
-        buf.reserve(self.token_size_hint().0);
-        self.try_extend_tokens(&mut buf)?;
-        Ok(buf)
+    fn try_to_tokens(&self) -> TtResult<TokenQueue, Self::Error> {
+        let mut q = TokenQueue::with_capacity(self.queue_size_hint().0);
+        self.try_extend_tokens(&mut q)?;
+        Ok(q)
     }
 }
 
 impl TryToTokens for Infallible {
     type Error = Infallible;
 
-    fn try_extend_tokens(&self, _: &mut TokenBuf) -> TtResult<()> {
+    fn try_extend_tokens(&self, _: &mut TokenQueue) -> TtResult<()> {
         match *self {}
     }
 }
@@ -122,34 +125,35 @@ impl TryToTokens for Infallible {
 impl TryToTokens for TokenStream {
     type Error = Infallible;
 
-    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<()> {
+    fn try_extend_tokens(&self, buf: &mut TokenQueue) -> TtResult<()> {
         buf.extend(self.clone());
         Ok(())
     }
 
-    fn try_to_tokens(&self) -> TtResult<TokenBuf> {
+    fn try_to_tokens(&self) -> TtResult<TokenQueue> {
         Ok(self.clone().into())
     }
 
-    fn token_size_hint(&self) -> (usize, Option<usize>) {
+    fn queue_size_hint(&self) -> (usize, Option<usize>) {
         (!self.is_empty() as usize, None)
     }
 }
 
-impl TryToTokens for TokenBuf {
+impl TryToTokens for TokenQueue {
     type Error = Infallible;
 
-    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<()> {
-        buf.concat(self);
+    fn try_extend_tokens(&self, q: &mut TokenQueue) -> TtResult<()> {
+        q.concat(self);
         Ok(())
     }
 
-    fn try_to_tokens(&self) -> TtResult<TokenBuf> {
+    fn try_to_tokens(&self) -> TtResult<TokenQueue> {
         Ok(self.clone())
     }
 
-    fn token_size_hint(&self) -> (usize, Option<usize>) {
-        self.size_hint()
+    fn queue_size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.len();
+        (n, Some(n))
     }
 }
 
@@ -157,12 +161,12 @@ impl<T: TryToTokens + ?Sized> TryToTokens for &T {
     type Error = T::Error;
 
     #[inline]
-    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<(), Self::Error> {
-        T::try_extend_tokens(self, buf)
+    fn try_extend_tokens(&self, q: &mut TokenQueue) -> TtResult<(), Self::Error> {
+        T::try_extend_tokens(self, q)
     }
 
     #[inline]
-    fn try_to_tokens(&self) -> TtResult<TokenBuf, Self::Error> {
+    fn try_to_tokens(&self) -> TtResult<TokenQueue, Self::Error> {
         T::try_to_tokens(self)
     }
 }
@@ -171,12 +175,12 @@ impl<T: TryToTokens + ?Sized> TryToTokens for &mut T {
     type Error = T::Error;
 
     #[inline]
-    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<(), Self::Error> {
-        T::try_extend_tokens(self, buf)
+    fn try_extend_tokens(&self, q: &mut TokenQueue) -> TtResult<(), Self::Error> {
+        T::try_extend_tokens(self, q)
     }
 
     #[inline]
-    fn try_to_tokens(&self) -> TtResult<TokenBuf, Self::Error> {
+    fn try_to_tokens(&self) -> TtResult<TokenQueue, Self::Error> {
         T::try_to_tokens(self)
     }
 }
@@ -185,59 +189,75 @@ impl<T: TryToTokens> TryToTokens for [T] {
     type Error = T::Error;
 
     #[inline]
-    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<(), Self::Error> {
+    fn try_extend_tokens(&self, q: &mut TokenQueue) -> TtResult<(), Self::Error> {
         for tt in self {
-            tt.try_extend_tokens(buf)?;
+            tt.try_extend_tokens(q)?;
         }
         Ok(())
     }
 
     #[inline]
-    fn try_to_tokens(&self) -> TtResult<TokenBuf, Self::Error> {
+    fn try_to_tokens(&self) -> TtResult<TokenQueue, Self::Error> {
         if let [tt] = self {
             return tt.try_to_tokens();
         }
 
-        let mut buf = TokenBuf::new();
-        buf.reserve(self.iter().map(|tt| tt.token_size_hint().0).sum());
+        let mut q = TokenQueue::new();
+        q.reserve(self.queue_size_hint().0);
         for tt in self {
-            tt.try_extend_tokens(&mut buf)?;
+            tt.try_extend_tokens(&mut q)?;
         }
 
-        Ok(buf)
+        Ok(q)
+    }
+
+    fn queue_size_hint(&self) -> (usize, Option<usize>) {
+        self.iter()
+            .map(T::queue_size_hint)
+            .fold((0, Some(0)), |(min, max), (a, b)| {
+                (min + a, max.and_then(|max| b.map(|b| max + b)))
+            })
     }
 }
 
 impl<T: TryToTokens> TryToTokens for Option<T> {
     type Error = T::Error;
 
-    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<(), T::Error> {
+    fn try_extend_tokens(&self, q: &mut TokenQueue) -> TtResult<(), T::Error> {
         if let Some(this) = self {
-            this.try_extend_tokens(buf)?;
+            this.try_extend_tokens(q)?;
         }
         Ok(())
     }
 
-    fn try_to_tokens(&self) -> TtResult<TokenBuf, Self::Error> {
+    fn try_to_tokens(&self) -> TtResult<TokenQueue, Self::Error> {
         if let Some(this) = self {
             this.try_to_tokens()
         } else {
-            Ok(TokenBuf::new())
+            Ok(TokenQueue::new())
         }
+    }
+
+    fn queue_size_hint(&self) -> (usize, Option<usize>) {
+        self.as_ref().map_or((0, None), T::queue_size_hint)
     }
 }
 
 /// Evaluates to `@`. Useful for escaping.
 ///
-/// See [`quote`](crate::quote#escaping-) for use cases.
+/// See [`quote`](crate::quote!#escaping-) for use cases.
 pub struct YouKnowWhatIMean;
 
 impl TryToTokens for YouKnowWhatIMean {
     type Error = Infallible;
 
-    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<()> {
-        buf.push(Punct::new('@', Spacing::Alone));
+    fn try_extend_tokens(&self, q: &mut TokenQueue) -> TtResult<()> {
+        q.push(Punct::new('@', Spacing::Alone));
         Ok(())
+    }
+
+    fn queue_size_hint(&self) -> (usize, Option<usize>) {
+        (1, Some(1))
     }
 }
 
@@ -247,13 +267,17 @@ macro_rules! impl_to_tokens_tt {
             impl TryToTokens for $t {
                 type Error = Infallible;
 
-                fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<()> {
-                    buf.push(self.clone());
+                fn try_extend_tokens(&self, q: &mut TokenQueue) -> TtResult<()> {
+                    q.push(self.clone());
                     Ok(())
+                }
+
+                fn queue_size_hint(&self) -> (usize, Option<usize>) {
+                    (1, Some(1))
                 }
             }
         )*
     };
 }
 
-impl_to_tokens_tt!(Punct, Ident, Group, Literal);
+impl_to_tokens_tt! { Punct, Ident, Group, Literal }

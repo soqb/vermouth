@@ -1,6 +1,6 @@
-use proc_macro::{Diagnostic, Level, TokenStream};
+use proc_macro::{Diagnostic, Level};
 
-use crate::{DiagnosticLevel, ToSpan};
+use crate::{DiagnosticLevel, ToSpan, TokenQueue};
 
 pub struct EmitState {
     _marker: (),
@@ -19,7 +19,7 @@ impl super::Emitter for EmitState {
         Diagnostic::spanned(span.span(), level, msg.to_string()).emit()
     }
 
-    fn finish(self) -> TokenStream {
-        TokenStream::new()
+    fn finish(self) -> TokenQueue {
+        TokenQueue::new()
     }
 }

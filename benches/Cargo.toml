@@ -1,0 +1,7 @@
+[package]
+name = "benches"
+edition = "2024"
+
+[dependencies]
+macrobench = { path = "../macrobench" }
+

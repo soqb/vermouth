@@ -4,13 +4,13 @@ use proc_macro::{
     Span, TokenStream, TokenTree,
 };
 
-use crate::{DiagnosticLevel, ToSpan, TokenBuf};
+use crate::{DiagnosticLevel, ToSpan, TokenQueue};
 
 pub struct EmitState {
-    tokens: TokenBuf,
+    tokens: TokenQueue,
 }
 
-fn emit_error(buf: &mut TokenBuf, span: Span, msg: String) {
+fn emit_error(buf: &mut TokenQueue, span: Span, msg: String) {
     macro_rules! quote_path {
         ($buf:ident <-) => {};
         ($buf:ident <- :: $n:ident $(:: $r:ident)*) => {
@@ -42,25 +42,25 @@ fn emit_error(buf: &mut TokenBuf, span: Span, msg: String) {
 }
 
 #[cfg(feature = "warnings")]
-fn emit_warning(buf: &mut TokenBuf, span: Span, mut msg: String) {
+fn emit_warning(buf: &mut TokenQueue, span: Span, mut msg: String) {
     // we really need quote !!!
-    fn in_const_block(buf: &mut TokenBuf, f: impl FnOnce(&mut TokenBuf)) {
+    fn in_const_block(buf: &mut TokenQueue, f: impl FnOnce(&mut TokenQueue)) {
         buf.push(Ident::new("const", Span::call_site()));
         buf.push(Ident::new("_", Span::call_site()));
         buf.push(Punct::new(':', Alone));
         buf.push(Group::new(Delimiter::Parenthesis, TokenStream::new()));
         buf.push(Punct::new('=', Alone));
 
-        let mut group = TokenBuf::new();
+        let mut group = TokenQueue::new();
         f(&mut group);
         buf.push(Group::new(Delimiter::Brace, group.into()));
         buf.push(Punct::new(';', Alone));
     }
 
-    fn in_attr(buf: &mut TokenBuf, f: impl FnOnce(&mut TokenBuf)) {
+    fn in_attr(buf: &mut TokenQueue, f: impl FnOnce(&mut TokenQueue)) {
         buf.push(Punct::new('#', Alone));
 
-        let mut group = TokenBuf::new();
+        let mut group = TokenQueue::new();
         f(&mut group);
         buf.push(Group::new(Delimiter::Bracket, group.into()));
     }
@@ -90,7 +90,7 @@ fn emit_warning(buf: &mut TokenBuf, span: Span, mut msg: String) {
 impl super::Emitter for EmitState {
     fn new() -> Self {
         EmitState {
-            tokens: TokenBuf::new(),
+            tokens: TokenQueue::new(),
         }
     }
     fn emit(&mut self, level: DiagnosticLevel, span: impl ToSpan, msg: &impl ToString) {
@@ -102,7 +102,7 @@ impl super::Emitter for EmitState {
         }
     }
 
-    fn finish(self) -> TokenStream {
-        self.tokens.into()
+    fn finish(self) -> TokenQueue {
+        self.tokens
     }
 }

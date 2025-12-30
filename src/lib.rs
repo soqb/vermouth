@@ -14,6 +14,7 @@
     )
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![forbid(unsafe_code)]
 
 //! _Fortification against [sin][`syn`]._
 //! A new kind of parser for procedural macros.
@@ -95,11 +96,15 @@ macro_rules! ඞ_declare_test {
 #[macro_use]
 mod ctfe;
 
-mod buf;
+#[cfg(feature = "parse")]
 mod error;
 mod ext;
+#[cfg(feature = "parse")]
 mod parser;
+#[cfg(feature = "parse")]
 mod pat;
+mod punct;
+mod queue;
 #[cfg(feature = "quote")]
 mod quote;
 mod span;
@@ -108,7 +113,10 @@ mod to_tokens;
 #[cfg(feature = "quote")]
 pub use quote::*;
 
-pub use self::{buf::*, error::*, ext::*, parser::*, pat::*, span::*, to_tokens::*};
+#[cfg(feature = "parse")]
+pub use self::{error::*, parser::*, pat::*};
+
+pub use self::{ext::*, queue::*, span::*, to_tokens::*};
 
 #[doc(hidden)]
 #[path = "macro_exports/mod.rs"]
@@ -117,7 +125,7 @@ pub mod ඞ_macro_exports;
 #[cfg(feature = "attributes")]
 pub mod attributes;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "attributes", feature = "quote"))]
 mod tests {
     use proc_macro::{Ident, Literal, Span, TokenStream, TokenTree};
 
@@ -194,7 +202,6 @@ mod tests {
             .map(TokenTree::from)
             .collect();
         let ref mut cx = Parser::new(tokens, Span::call_site());
-        eprintln!("{:?}", cx.here());
 
         nibbles_to(cx, Some(1), 'A');
         nibbles_to(cx, Some(2), 'B');

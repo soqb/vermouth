@@ -1,6 +1,6 @@
 use crate::for_all_punct_seqs;
 
-/// The fallible variant of [`quote`](crate::quote).
+/// The fallible variant of [`quote`](crate::quote!).
 ///
 /// # Errors
 ///
@@ -12,6 +12,7 @@ use crate::for_all_punct_seqs;
 /// `try_quote` cannot generally infer an appropriate value of `E`.
 /// Usually, [`Infallible`](std::convert::Infallible) is sufficient
 /// since [`TtError`](crate::TtError) already encapsulates the errors that arise from e.g. quoting literals.
+#[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
 #[macro_export]
 macro_rules! try_quote {
     {} => {
@@ -21,8 +22,8 @@ macro_rules! try_quote {
         'esc: {
             #[allow(unused_imports)]
             use $crate::{TtResult, TryToTokens as _, ඞ_macro_exports::{self as m, proc_macro, core, Spec, SpecLiteralQuote as _}};
-            $crate::ඞ_macro_inline_quote_impl! { buf 'esc $($t)* }
-            break 'esc TtResult::Ok(buf);
+            $crate::ඞ_macro_inline_quote_impl! { q 'esc $($t)* }
+            break 'esc TtResult::Ok(q);
         }
     };
 }
@@ -63,7 +64,7 @@ macro_rules! ඞ_macro_bail_specialized {
 /// - In a function returning `TtResult<T, E>`, we propogate the error to the caller.
 /// - In any other context, we panic by unwrapping.
 ///
-/// If the default behavior is wrong, try using [`try_quote`](crate::try_quote) and specifying types exactly.
+/// If the default behavior is wrong, try using [`try_quote`] and specifying types exactly.
 ///
 /// # Escaping `@@@`
 ///
@@ -89,9 +90,10 @@ macro_rules! ඞ_macro_bail_specialized {
 ///     let foo @YouKnowWhatIMean @my_pattern = todo!();
 /// };
 /// ```
+#[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
 #[macro_export]
 macro_rules! quote {
-    {} => { $crate::TokenBuf::new() };
+    {} => { $crate::TokenQueue::new() };
     {$($t:tt)*} => {{
         let tokens = $crate::try_quote! { $($t)* };
         match tokens {
@@ -106,25 +108,30 @@ macro_rules! quote {
 /// One syntax is supported:
 /// `try_extend_quote!(buf, { my tokens })` writes `my tokens` into `buf`.
 ///
-/// See [`try_quote`] for the details of quasi-quoting syntax.
+/// See [`quote`](crate::quote!) for the details of quasi-quoting syntax.
+#[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
 #[macro_export]
 macro_rules! try_extend_quote {
-    ($buf:expr, { $($t:tt)* }) => {
+    ($q:expr, { $($t:tt)* }) => {
         'esc: {
             #[allow(unused_imports)]
             use $crate::{TtResult, TryToTokens as _, ඞ_macro_exports::{self as m, proc_macro, core, Spec, SpecLiteralQuote as _}};
-            let _buf = $buf;
-            let mut v = 0usize;
-            $crate::ඞ_macro_quote_reserve_size! { v $($t)* };
-            $crate::TokenBuf::reserve(_buf, v);
-            $crate::ඞ_macro_extend_quote_impl! { _buf 'esc $($t)* };
+            let _q = $q;
+            #[cfg(not(debug_assertions))]
+            {
+                let mut v = 0usize;
+                $crate::ඞ_macro_quote_reserve_size! { v $($t)* };
+                $crate::TokenQueue::reserve(_q, v);
+            }
+            $crate::ඞ_macro_extend_quote_impl! { _q 'esc $($t)* };
             break 'esc TtResult::Ok(());
     }};
 }
 
 /// Returns an object implementing [`TryToTokens`](crate::TryToTokens) which represents some quasi-quoted Rust source.
 ///
-/// See [`try_quote`] for the details of quasi-quoting syntax.
+/// See [`quote`](crate::quote!) for the details of quasi-quoting syntax.
+#[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
 #[macro_export]
 macro_rules! delay_quote {
     ($($t:tt)*) => {
@@ -137,42 +144,45 @@ macro_rules! delay_quote {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! ඞ_macro_inline_quote_impl {
-    ($buf:ident $s:lifetime @ $name:ident) => {
+    ($q:ident $s:lifetime @ $name:ident) => {
         #[allow(unused_mut)]
-        let mut $buf = match m::try_to_tokens($name) {
+        let mut $q = match m::try_to_tokens($name) {
             TtResult::Ok(buf) => buf,
             TtResult::Err(err) => break $s m::err(err),
         };
     };
-    ($buf:ident $s:lifetime $($t:tt)*) => {
-        let mut $buf = $crate::TokenBuf::new();
-        let _buf = &mut $buf;
-        let mut v = 0usize;
-        $crate::ඞ_macro_quote_reserve_size! { v $($t)* };
-        $crate::TokenBuf::reserve(_buf, v);
-        $crate::ඞ_macro_extend_quote_impl! { _buf $s $($t)* };
+    ($q:ident $s:lifetime $($t:tt)*) => {
+        let mut $q = $crate::TokenQueue::new();
+        let _q = &mut $q;
+        #[cfg(not(debug_assertions))]
+        {
+            let mut v = 0usize;
+            $crate::ඞ_macro_quote_reserve_size! { v $($t)* };
+            $crate::TokenQueue::reserve(_q, v);
+        }
+        $crate::ඞ_macro_extend_quote_impl! { _q $s $($t)* };
     };
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! ඞ_macro_extend_quote_impl {
-    ($buf:ident $s:lifetime) => {};
-    ($buf:ident $s:lifetime @) => {
+    ($q:ident $s:lifetime) => {};
+    ($q:ident $s:lifetime @) => {
         core::compile_error!("invalid quasi-quoting syntax: `@` cannot trail the input.");
     };
-    ($buf:ident $s:lifetime $t:tt) => {
-        $crate::ඞ_macro_quote_tt_impl! { $buf $s {$t} };
+    ($q:ident $s:lifetime $t:tt) => {
+        $crate::ඞ_macro_quote_tt_impl! { $q $s {$t} };
     };
-    ($buf:ident $s:lifetime @ $n:ident) => {
-        if let TtResult::Err(e) = $n.try_extend_tokens($buf) {
+    ($q:ident $s:lifetime @ $n:ident) => {
+        if let TtResult::Err(e) = $n.try_extend_tokens($q) {
             break $s m::err(e);
         }
     };
-    ($buf:ident $s:lifetime $($t:tt)*) => {
+    ($q:ident $s:lifetime $($t:tt)*) => {
         $crate::ඞ_macro_quote_matrixed! {
             ඞ_macro_quote_emit
-            { $buf $s }
+            { $q $s }
             { _ _ _ _ _ $({$t})* }
             { _ _ _ _ $({$t})* _ }
             { _ _ _ $({$t})* _ _ }
@@ -186,11 +196,11 @@ macro_rules! ඞ_macro_extend_quote_impl {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! ඞ_macro_quote_emit {
-    (tt {$buf:ident $s:lifetime} $t:tt) => {
-        $crate::ඞ_macro_quote_tt_impl! { $buf $s $t };
+    (tt {$q:ident $s:lifetime} $t:tt) => {
+        $crate::ඞ_macro_quote_tt_impl! { $q $s $t };
     };
-    (embed {$buf:ident $s:lifetime} $n:ident) => {
-        if let TtResult::Err(e) = $n.try_extend_tokens($buf) {
+    (embed {$q:ident $s:lifetime} $n:ident) => {
+        if let TtResult::Err(e) = $n.try_extend_tokens($q) {
             break $s m::err(e);
         }
     };
@@ -222,7 +232,7 @@ macro_rules! ඞ_macro_quote_reserve_size {
         $crate::ඞ_macro_quote_reserve_size_tt! { $v {$t} }
     };
     ($v:ident @ $n:ident) => {
-        $v = $v.wrapping_add($n.token_size_hint().0);
+        $v = $v.wrapping_add($n.queue_size_hint().0);
     };
     ($v:ident $($t:tt)*) => {
         $crate::ඞ_macro_quote_matrixed! {
@@ -254,6 +264,9 @@ macro_rules! ඞ_macro_quote_reserve_size_tt {
             $v = $v.wrapping_add(2usize);
             $crate::ඞ_macro_quote_reserve_size! { $v $($t)* }
         };
+        ($v:ident {$lt:lifetime}) => {
+            $v = $v.wrapping_add(2usize);
+        };
         ($v:ident {$t:tt}) => {
             $v = $v.wrapping_add(1usize);
         };
@@ -267,7 +280,7 @@ macro_rules! ඞ_macro_quote_reserve_size_emit {
         $crate::ඞ_macro_quote_reserve_size_tt! { $v $t }
     };
     (embed $v:ident $n:ident) => {
-        $v = $v.wrapping_add($n.token_size_hint().0);
+        $v = $v.wrapping_add($n.queue_size_hint().0);
     };
     (rep $v:ident $n:ident $($t:tt)*) => {};
     (seprep $v:ident $n:ident $sep:tt $($t:tt)*) => {};
@@ -290,7 +303,7 @@ macro_rules! ඞ_macro_quote_parse_windowed {
     };
     ($m:ident $cx:tt $_0:tt {@} {$n:ident} {($($t:tt)*)} {*} $a:tt) => {
         $crate::$m! { rep $cx $n $($t)* }
-        $crate::ඞ_macro_quote_window6! { $buf $s _ _ _ _ _ $a }
+        $crate::ඞ_macro_quote_window6! { $q $s _ _ _ _ _ $a }
     };
     ($m:ident $cx:tt $_0:tt {@} {$n:ident} {($($t:tt)*)} {$sep:tt} {*}) => {
         $crate::$m! { seprep $cx $n $sep $($t)* }
@@ -360,10 +373,11 @@ macro_rules! def_quote_tt {
         #[macro_export]
         #[doc(hidden)]
         macro_rules! ඞ_macro_quote_tt_impl_ {
+            $($arm)*
             $(
-                ($buf:ident $s:lifetime {$p}) => {
+                ($q:ident $s:lifetime {$p}) => {
                     m::push_punct(
-                        $buf,
+                        $q,
                         $crate::punct_decompose!(
                             expand = $crate::ඞ_macro_quote_punct_seq,
                             fallback = {
@@ -379,7 +393,6 @@ macro_rules! def_quote_tt {
                     );
                 };
             )*
-            $($arm)*
         }
 
         #[doc(hidden)]
@@ -390,33 +403,41 @@ macro_rules! def_quote_tt {
 for_all_punct_seqs!(
     def_quote_tt,
     arms = {
-        ($buf:ident $s:lifetime _) => {};
-        ($buf:ident $s:lifetime {($($t:tt)*)}) => {
-            $crate::TokenBuf::open_group($buf, proc_macro::Delimiter::Parenthesis);
-            $crate::ඞ_macro_extend_quote_impl! { $buf $s $($t)* };
-            $crate::TokenBuf::close_group($buf);
+        ($q:ident $s:lifetime _) => {};
+        ($q:ident $s:lifetime {_}) => {
+            m::push_underscore($q);
         };
-        ($buf:ident $s:lifetime {{$($t:tt)*}}) => {
-            $crate::TokenBuf::open_group($buf, proc_macro::Delimiter::Brace);
-            $crate::ඞ_macro_extend_quote_impl! { $buf $s $($t)* };
-            $crate::TokenBuf::close_group($buf);
+        ($q:ident $s:lifetime {($($t:tt)*)}) => {
+            $crate::TokenQueue::open_group($q, proc_macro::Delimiter::Parenthesis);
+            $crate::ඞ_macro_extend_quote_impl! { $q $s $($t)* };
+            $crate::TokenQueue::close_group($q);
         };
-        ($buf:ident $s:lifetime {[$($t:tt)*]}) => {
-            $crate::TokenBuf::open_group($buf, proc_macro::Delimiter::Bracket);
-            $crate::ඞ_macro_extend_quote_impl! { $buf $s $($t)* };
-            $crate::TokenBuf::close_group($buf);
+        ($q:ident $s:lifetime {{$($t:tt)*}}) => {
+            $crate::TokenQueue::open_group($q, proc_macro::Delimiter::Brace);
+            $crate::ඞ_macro_extend_quote_impl! { $q $s $($t)* };
+            $crate::TokenQueue::close_group($q);
         };
-        ($buf:ident $s:lifetime {$id:ident}) => {
-            if let TtResult::Err(e) = const { m::parse_ident(stringify!($id)) }.try_extend_tokens($buf) {
+        ($q:ident $s:lifetime {[$($t:tt)*]}) => {
+            $crate::TokenQueue::open_group($q, proc_macro::Delimiter::Bracket);
+            $crate::ඞ_macro_extend_quote_impl! { $q $s $($t)* };
+            $crate::TokenQueue::close_group($q);
+        };
+        ($q:ident $s:lifetime {$id:ident}) => {
+            if let TtResult::Err(e) = const { m::parse_ident(stringify!($id)) }.try_extend_tokens($q) {
                 break $s m::err(e);
             }
         };
-        ($buf:ident $s:lifetime {$lit:literal}) => {
+        ($q:ident $s:lifetime {$lit:literal}) => {
             if let TtResult::Err(e) = m::Spec::new(&$lit).ඞ_lit_quote::<{ m::parse_lit_regime(core::stringify!($lit)) }>(
                 &$lit,
                 core::stringify!($lit),
-                $buf
+                $q
             ) {
+                break $s m::err(e);
+            }
+        };
+        ($q:ident $s:lifetime {$lt:lifetime}) => {
+            if let TtResult::Err(e) = const { m::parse_lifetime(stringify!($lt)) }.try_extend_tokens($q) {
                 break $s m::err(e);
             }
         };

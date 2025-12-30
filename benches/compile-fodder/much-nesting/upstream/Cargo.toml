@@ -1,0 +1,15 @@
+[package]
+name = "upstream"
+edition = "2024"
+
+[lib]
+proc-macro = true
+path = "lib.rs"
+
+[dependencies]
+vermouth = { path = "../../../../", default-features = false, features = ["quote"], optional = true }
+quote = { version = "1.0.42", optional = true }
+
+[features]
+vermouth = ["dep:vermouth"]
+dtolnay = ["dep:quote"]

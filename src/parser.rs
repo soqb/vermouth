@@ -1,6 +1,6 @@
 use proc_macro::{Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
-use crate::{Diagnostic, Expected, Pattern, Result, ToSpan};
+use crate::{Diagnostic, Expected, Pattern, Result, ToSpan, TokenQueue};
 
 struct Stream<T, I> {
     seen_buffer: Vec<T>,
@@ -455,7 +455,7 @@ impl Parser {
     /// This method has the same semantics as [`Diagnostic::emit`].
     ///
     /// [reported]: Parser::report
-    pub fn emit_diagnostics(&mut self) -> TokenStream {
+    pub fn emit_diagnostics(&mut self) -> TokenQueue {
         Diagnostic::emit_many(self.diag_buf.drain(..))
     }
 

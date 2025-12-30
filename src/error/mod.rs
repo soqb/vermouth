@@ -1,9 +1,9 @@
 use core::fmt;
 use std::{borrow::Cow, mem::replace};
 
-use proc_macro::{Span, TokenStream};
+use proc_macro::Span;
 
-use crate::{Parser, ParserPos, ToSpan};
+use crate::{Parser, ParserPos, ToSpan, TokenQueue};
 
 #[cfg_attr(feature = "unstable-diagnostics-backend", path = "emit_unstable.rs")]
 mod emit;
@@ -11,7 +11,7 @@ mod emit;
 trait Emitter {
     fn new() -> Self;
     fn emit(&mut self, level: DiagnosticLevel, span: impl ToSpan, msg: &impl ToString);
-    fn finish(self) -> TokenStream;
+    fn finish(self) -> TokenQueue;
 }
 
 /// An alias for the standard library [`Result`](core::result::Result).
@@ -343,11 +343,11 @@ impl PartialEq for DiagnosticKind {
 /// ## Reporting
 ///
 /// To emit accumulated diagnostics at runtime, [`Diagnostic::emit`] and [`Diagnostic::emit_many`]
-/// return `TokenStream`s which compile to a series of invocations of the [`compile_error`] macro.
+/// return `TokenQueue`s which evaluate to a series of invocations of the [`compile_error`] macro.
 ///
 /// **NB:** The following is subject to change:
 ///
-/// In stable Rust (as of version 1.80),
+/// In stable Rust (as of version 1.92),
 /// there is no built-in support for emitting diagnostics other than compile errors.
 /// However, by enabling the `"warnings"` feature, `vermouth` will provide
 /// best effort support for custom
@@ -490,10 +490,10 @@ impl Diagnostic {
     ///
     /// Depending on the feature configuration and execution context,
     /// some errors may be reported immediately
-    /// and some may be contained in the retuned [`TokenStream`].
+    /// and some may be contained in the retuned [`TokenQueue`].
     #[must_use = "reported diagnostics should be returned from proc macros"]
     #[inline]
-    pub fn emit(self) -> TokenStream {
+    pub fn emit(self) -> TokenQueue {
         Self::emit_many(Some(self))
     }
 
@@ -502,7 +502,7 @@ impl Diagnostic {
     /// See [`Diagnostic::emit`] for a detailed description.
     #[must_use = "reported diagnostics should be returned from proc macros"]
     #[inline]
-    pub fn emit_many(ds: impl IntoIterator<Item = Self>) -> TokenStream {
+    pub fn emit_many(ds: impl IntoIterator<Item = Self>) -> TokenQueue {
         let mut emitter = emit::EmitState::new();
         for d in ds {
             d.kind.emit(&mut emitter);

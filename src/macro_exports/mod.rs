@@ -2,7 +2,7 @@
 
 use proc_macro::{Ident, Punct, Spacing, Span, TokenStream};
 
-use crate::{ReparseError, TokenBuf, TryToTokens, TtError, TtResult, ctfe};
+use crate::{ReparseError, TokenQueue, TryToTokens, TtError, TtResult, ctfe};
 use std::{convert::Infallible, error::Error, str::FromStr};
 
 pub use core;
@@ -29,28 +29,50 @@ pub fn ok<T, E>(x: T) -> TtResult<T, E> {
 }
 
 #[inline]
-pub fn try_extend_tokens<T: TryToTokens>(buf: &mut TokenBuf, t: T) -> TtResult<(), T::Error> {
-    buf.reserve(t.token_size_hint().0);
+pub fn try_extend_tokens<T: TryToTokens>(buf: &mut TokenQueue, t: T) -> TtResult<(), T::Error> {
+    buf.reserve(t.queue_size_hint().0);
     t.try_extend_tokens(buf)?;
     Ok(())
 }
 
 #[inline]
-pub fn try_to_tokens<T: TryToTokens>(t: T) -> TtResult<TokenBuf, T::Error> {
+pub fn try_to_tokens<T: TryToTokens>(t: T) -> TtResult<TokenQueue, T::Error> {
     t.try_to_tokens()
 }
 
+pub fn push_underscore(q: &mut TokenQueue) {
+    q.push(Ident::new("_", Span::call_site()));
+}
+
+pub const fn parse_lifetime(str: &'static str) -> impl TryToTokens<Error = Infallible> + Copy {
+    #[derive(Clone, Copy)]
+    struct Lifetime<T>(T);
+
+    impl<T: TryToTokens> TryToTokens for Lifetime<T> {
+        type Error = T::Error;
+
+        fn try_extend_tokens(&self, q: &mut TokenQueue) -> TtResult<(), T::Error> {
+            q.push(Punct::new('\'', Spacing::Joint));
+            self.0.try_extend_tokens(q)
+        }
+    }
+
+    // NB: no assert_eq bc const.
+    assert!(str.as_bytes()[0] == b'\'');
+    Lifetime(parse_ident(str.split_at(1).1))
+}
+
 #[inline(never)]
-pub fn push_punct(buf: &mut TokenBuf, chars: &[char]) {
+pub fn push_punct(q: &mut TokenQueue, chars: &[char]) {
     let Some((&last, rest)) = chars.split_last() else {
         return;
     };
 
     for &c in rest {
-        buf.push(Punct::new(c, Spacing::Joint));
+        q.push(Punct::new(c, Spacing::Joint));
     }
 
-    buf.push(Punct::new(last, Spacing::Alone));
+    q.push(Punct::new(last, Spacing::Alone));
 }
 
 pub const fn parse_ident(str: &'static str) -> impl TryToTokens<Error = Infallible> + Copy {
@@ -65,14 +87,14 @@ pub const fn parse_ident(str: &'static str) -> impl TryToTokens<Error = Infallib
         type Error = Infallible;
 
         #[inline(always)]
-        fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<()> {
+        fn try_extend_tokens(&self, q: &mut TokenQueue) -> TtResult<()> {
             match self {
-                IdentParse::Raw(s) => buf.push(Ident::new_raw(s, Span::call_site())),
-                IdentParse::Notraw(s) => buf.push(Ident::new(s, Span::call_site())),
+                IdentParse::Raw(s) => q.push(Ident::new_raw(s, Span::call_site())),
+                IdentParse::Notraw(s) => q.push(Ident::new(s, Span::call_site())),
                 IdentParse::Fallback(s) => {
                     let tt = TokenStream::from_str(s)
                         .map_err(move |lex| ReparseError::from_ident(lex, s))?;
-                    buf.extend(tt);
+                    q.extend(tt);
                 }
             }
             Ok(())
@@ -97,16 +119,16 @@ pub const fn parse_lit_regime(str: &'static str) -> u8 {
 #[derive(Clone, Copy)]
 struct TokenF<F>(F);
 
-impl<E: From<Infallible> + Error, F: Fn(&mut TokenBuf) -> TtResult<(), E>> TryToTokens
+impl<E: From<Infallible> + Error, F: Fn(&mut TokenQueue) -> TtResult<(), E>> TryToTokens
     for TokenF<F>
 {
     type Error = E;
-    fn try_extend_tokens(&self, buf: &mut TokenBuf) -> TtResult<(), E> {
+    fn try_extend_tokens(&self, buf: &mut TokenQueue) -> TtResult<(), E> {
         (&self.0)(buf)
     }
 }
 
-pub fn make_fn<E: From<Infallible> + Error, F: Fn(&mut TokenBuf) -> TtResult<(), E>>(
+pub fn make_fn<E: From<Infallible> + Error, F: Fn(&mut TokenQueue) -> TtResult<(), E>>(
     f: F,
 ) -> impl TryToTokens<Error = E> {
     TokenF(f)
