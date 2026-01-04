@@ -9,4 +9,4 @@ publish = false
 proc-macro = true
 
 [dependencies]
-vermouth = { path = "../../..", features = ["warnings"] }
+vermouth = { workspace = true, features = ["warnings"] }

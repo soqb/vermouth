@@ -6,7 +6,7 @@ use quote::quote;
 #[cfg(feature = "vermouth")]
 use vermouth::quote;
 
-const ITERS: usize = 2usize.pow(12);
+const ITERS: usize = 2usize.pow(14);
 
 #[cfg(any(feature = "vermouth", feature = "dtolnay"))]
 #[proc_macro]

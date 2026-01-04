@@ -1,6 +1,6 @@
 //! The domain-specific library for this crate's macros (especially [`try_quote`](crate::try_quote)).
 
-use proc_macro::{Ident, Punct, Spacing, Span, TokenStream};
+use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream};
 
 use crate::{ReparseError, TokenQueue, TryToTokens, TtError, TtResult, ctfe};
 use std::{convert::Infallible, error::Error, str::FromStr};
@@ -42,6 +42,10 @@ pub fn try_to_tokens<T: TryToTokens>(t: T) -> TtResult<TokenQueue, T::Error> {
 
 pub fn push_underscore(q: &mut TokenQueue) {
     q.push(Ident::new("_", Span::call_site()));
+}
+
+pub fn push_empty_group(q: &mut TokenQueue, delim: Delimiter) {
+    q.push(Group::new(delim, TokenStream::new()));
 }
 
 pub const fn parse_lifetime(str: &'static str) -> impl TryToTokens<Error = Infallible> + Copy {

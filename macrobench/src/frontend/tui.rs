@@ -91,12 +91,7 @@ impl<'a> Runtime<'a> {
             match ev {
                 Event::Key(KeyEvent { code, .. }) if code == KeyCode::Char('q') => break,
                 Event::Resize(_, _) => redraw = true,
-                Event::Mouse(MouseEvent {
-                    kind: ev,
-                    column,
-                    row,
-                    ..
-                }) => match ev {
+                Event::Mouse(MouseEvent { kind: ev, .. }) => match ev {
                     MouseEventKind::ScrollDown => self.results_table_state.scroll_down_by(1),
                     MouseEventKind::ScrollUp => self.results_table_state.scroll_up_by(1),
                     MouseEventKind::ScrollLeft => self.results_table_state.scroll_left_by(1),

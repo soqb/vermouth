@@ -1,6 +1,6 @@
-use std::fmt;
+use std::{fmt, num::NonZero};
 
-use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Span, TokenStream, TokenTree};
 
 /// General purpose buffer for token composition.
 ///
@@ -26,126 +26,151 @@ use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenSt
 // / Under this analogy, `TokenQueue` is our "command queue."
 // / Writing to the queue is fast, and ["commits"](TokenQueue#impl-From%3CTokenQueue%3E-for-TokenStream) occur up to once,
 // / all at once, reducing the "API cost" of sending messages to an from the server.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct TokenQueue {
     chunks: Vec<Chunk>,
-    stack_depth: usize,
+    /// Index of the top of the group stack.
+    group_stack_top_ptr: Option<usize>,
 }
 
 // NB: not the `Debug` impl we use for the queue, but useful in its own right.
 #[derive(Debug, Clone)]
 enum Chunk {
+    PutGroup(Group),
+    PutIdent(Ident),
+    PutLiteral(Literal),
+    PutPunct(Punct),
     Embed(TokenStream),
-    Unit(TokenTree),
-    Push(Delimiter),
-    Pop(Option<Span>),
+    OpenGroup(GroupHeader),
 }
 
-impl fmt::Debug for TokenQueue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TokenQueue")
-            .field("chunks", &FmtChunks(&self.chunks))
-            .field("stack_depth", &self.stack_depth)
-            .finish()
+#[derive(Debug, Clone)]
+struct GroupHeader {
+    delim: Delimiter,
+    /// The negative offset of the parent group within the chunk buffer.
+    parent: Option<NonZero<usize>>,
+}
+
+impl GroupHeader {
+    pub fn new(addr: usize, delim: Delimiter, parent: Option<usize>) -> GroupHeader {
+        let parent = parent.map(|a| NonZero::new(addr - a).unwrap());
+        GroupHeader { delim, parent }
+    }
+
+    pub fn parent(&self, addr: usize) -> Option<usize> {
+        self.parent.map(|n| addr - n.get())
     }
 }
+
 impl From<TokenTree> for Chunk {
-    fn from(tt: TokenTree) -> Self {
-        Chunk::Unit(tt)
+    fn from(tt: TokenTree) -> Chunk {
+        match tt {
+            TokenTree::Group(a) => Chunk::PutGroup(a),
+            TokenTree::Ident(a) => Chunk::PutIdent(a),
+            TokenTree::Punct(a) => Chunk::PutPunct(a),
+            TokenTree::Literal(a) => Chunk::PutLiteral(a),
+        }
     }
 }
 
-pub(crate) struct FmtChunks<'a>(&'a [Chunk]);
-impl<'a> fmt::Debug for FmtChunks<'a> {
+pub(crate) struct DisplayChunks<'a>(&'a [Chunk]);
+impl<'a> fmt::Display for DisplayChunks<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn fmt_chunks_until_pop<'a>(
+        fn delim_wings(delim: Delimiter) -> (&'static str, &'static str) {
+            match delim {
+                Delimiter::Parenthesis => ("(", ")"),
+                Delimiter::Brace => ("{", "}"),
+                Delimiter::Bracket => ("[", "]"),
+                Delimiter::None => ("∅", "∅"),
+            }
+        }
+
+        fn fmt_preamble(f: &mut fmt::Formatter<'_>, n: usize) -> fmt::Result {
+            if f.alternate() {
+                f.write_str("\n    ")?;
+                for _ in 0..n {
+                    f.write_str("    ")?;
+                }
+            } else {
+                f.write_str(" ")?;
+            }
+
+            Ok(())
+        }
+
+        fn fmt_group<'a>(group: &Group, f: &mut fmt::Formatter<'_>, n: usize) -> fmt::Result {
+            let (open, close) = delim_wings(group.delimiter());
+            f.write_str(open)?;
+            fmt_ts(group.stream().into_iter(), f, n + 1)?;
+            f.write_str(close)
+        }
+
+        fn fmt_ts<'a>(
+            ts: proc_macro::token_stream::IntoIter,
+            f: &mut fmt::Formatter<'_>,
+            n: usize,
+        ) -> fmt::Result {
+            for tt in ts {
+                fmt_preamble(f, n)?;
+
+                match tt {
+                    TokenTree::Group(group) => fmt_group(&group, f, n)?,
+                    TokenTree::Ident(id) => write!(f, "{id}")?,
+                    TokenTree::Punct(p) => write!(f, "{p}")?,
+                    TokenTree::Literal(lit) => write!(f, "{lit}")?,
+                }
+            }
+
+            Ok(())
+        }
+
+        fn fmt_chunks<'a>(
             chunks: &'a [Chunk],
             f: &mut fmt::Formatter<'_>,
             mut n: usize,
-        ) -> Result<&'a [Chunk], fmt::Error> {
+        ) -> fmt::Result {
             let mut chunks = chunks.iter();
             while let Some(chunk) = chunks.next() {
-                if let Chunk::Pop(_) = chunk {
-                    n = n.saturating_sub(1);
-                }
-
-                if f.alternate() {
-                    f.write_str("\n    ")?;
-                    for _ in 0..n {
-                        f.write_str("    ")?;
-                    }
-                } else {
-                    f.write_str(" ")?;
-                }
                 match chunk {
-                    Chunk::Embed(ts) => fmt::Debug::fmt(ts, f)?,
-                    Chunk::Unit(tt) => match tt {
-                        TokenTree::Group(_) => todo!(),
-                        TokenTree::Ident(tt) => write!(f, "{tt}")?,
-                        TokenTree::Punct(p) => {
-                            let mut p = p;
-                            write!(f, "{p}")?;
-                            while let Some(Chunk::Unit(TokenTree::Punct(p2))) =
-                                chunks.as_slice().get(0)
-                                && p.spacing() == Spacing::Joint
-                            {
-                                p = p2;
-                                write!(f, "{p}")?;
-                                chunks.next();
-                            }
-                        }
-                        TokenTree::Literal(tt) => write!(f, "{tt}")?,
-                    },
-                    Chunk::Push(delim) => {
-                        let (open, close) = match delim {
-                            Delimiter::Parenthesis => ("(", ")"),
-                            Delimiter::Brace => ("{", "}"),
-                            Delimiter::Bracket => ("[", "]"),
-                            Delimiter::None => ("\\(", "\\)"),
-                        };
-
+                    Chunk::Embed(ts) => fmt_ts(ts.clone().into_iter(), f, n)?,
+                    Chunk::PutGroup(group) => fmt_group(group, f, n)?,
+                    Chunk::PutIdent(id) => write!(f, "{id}")?,
+                    Chunk::PutPunct(p) => write!(f, "{p}")?,
+                    Chunk::PutLiteral(lit) => write!(f, "{lit}")?,
+                    Chunk::OpenGroup(hdr) => {
+                        let (open, _) = delim_wings(hdr.delim);
                         f.write_str(open)?;
-                        if let Some(Chunk::Pop(_)) = chunks.as_slice().get(0) {
-                            chunks.next();
-                        } else {
-                            chunks = fmt_chunks_until_pop(chunks.as_slice(), f, n + 1)?.iter();
-                        }
-                        f.write_str(close)?;
+                        n += 1;
                     }
-                    Chunk::Pop(_) => break,
                 }
             }
 
-            Ok(chunks.as_slice())
+            Ok(())
         }
 
-        f.write_str("${")?;
-        let mut chunks = self.0;
-        while !chunks.is_empty() {
-            if chunks.as_ptr() != self.0.as_ptr() {
-                f.write_str("$POP")?;
-            }
-            chunks = fmt_chunks_until_pop(chunks, f, 0)?;
-        }
-        let s = if f.alternate() { "\n}$" } else { " }$" };
-        f.write_str(s)
+        fmt_chunks(self.0, f, 0)
     }
 }
 
 macro_rules! impl_into_chunk_for_tt {
-    ($($ty:ty),*) => {
+    ($($var:ident($ty:ty),)*) => {
         $(
             impl From<$ty> for Chunk {
                 #[inline]
                 fn from(tt: $ty) -> Self {
-                    Chunk::Unit(tt.into())
+                    Chunk::$var(tt.into())
                 }
             }
         )*
     };
 }
 
-impl_into_chunk_for_tt!(Punct, Ident, Literal, Group);
+impl_into_chunk_for_tt! {
+    PutPunct(Punct),
+    PutIdent(Ident),
+    PutLiteral(Literal),
+    PutGroup(Group),
+}
 
 impl From<TokenStream> for Chunk {
     #[inline]
@@ -207,7 +232,7 @@ impl TokenQueue {
     pub const fn new() -> TokenQueue {
         TokenQueue {
             chunks: Vec::new(),
-            stack_depth: 0,
+            group_stack_top_ptr: None,
         }
     }
 
@@ -215,7 +240,7 @@ impl TokenQueue {
     pub fn with_capacity(n: usize) -> TokenQueue {
         TokenQueue {
             chunks: Vec::with_capacity(n),
-            stack_depth: 0,
+            group_stack_top_ptr: None,
         }
     }
 
@@ -231,9 +256,7 @@ impl TokenQueue {
 
     #[must_use]
     pub fn token_size_hint(&self) -> (usize, Option<usize>) {
-        let (min, max, popped) = token_size_hint_for_chunks(&self.chunks);
-        assert!(!popped, "{POP_NO_PUSH_MSG}");
-        (min, max)
+        token_size_hint_for_chunks(&self.chunks)
     }
 
     /// Reserves space for at least `n` additional token trees.
@@ -256,78 +279,77 @@ impl TokenQueue {
     }
 
     /// Extends an existing [`TokenStream`] with the contents of this queue.
-    pub fn extend_stream(self, ts: &mut TokenStream) {
-        let mut builder = TokenStreamBuilder::new(self.chunks.into_iter());
+    pub fn extend_stream(mut self, ts: &mut TokenStream) {
+        let mut builder = TokenStreamBuilder::new(self.chunks.drain(..));
         builder.drain_to::<(), _>(ts);
-        builder.assert_no_trailing_pop();
     }
 
     /// Copies the contents of the given `TokenQueue`
     pub fn concat(&mut self, rhs: &TokenQueue) {
         self.chunks.extend_from_slice(&rhs.chunks);
-        self.stack_depth += rhs.stack_depth;
+        // self.stack_depth += rhs.stack_depth;
     }
 
     pub fn open_group(&mut self, delim: Delimiter) {
-        self.stack_depth += 1;
-        self.chunks.push(Chunk::Push(delim));
+        let ptr = self.chunks.len();
+        let group = GroupHeader::new(ptr, delim, self.group_stack_top_ptr);
+        self.chunks.push(Chunk::OpenGroup(group));
+        self.group_stack_top_ptr = Some(ptr);
     }
 
-    pub fn close_group_with_span(&mut self, span: Option<Span>) {
-        self.stack_depth = self
-            .stack_depth
-            .checked_sub(1)
-            .unwrap_or_else(|| panic!("{POP_NO_PUSH_MSG}"));
-        self.chunks.push(Chunk::Pop(span));
-    }
+    #[must_use = "`close_group_with_span` returns a group, rather than enqueuing it."]
+    pub fn close_group_with_span(&mut self, span: Option<Span>) -> Group {
+        let Some(ptr) = self.group_stack_top_ptr else {
+            panic!("{POP_NO_PUSH_MSG}")
+        };
 
-    pub fn close_group(&mut self) {
-        self.close_group_with_span(None);
-    }
-}
+        let mut drain = self.chunks.drain(ptr..);
+        let Some(Chunk::OpenGroup(hdr)) = drain.next() else {
+            panic!("expected chunk at index {ptr} to be a `PushGroup`");
+        };
 
-fn balance_chunks(chunks: &[Chunk]) -> &[Chunk] {
-    let mut stack = 0usize;
-    let mut chunks = chunks.iter();
+        self.group_stack_top_ptr = hdr.parent(ptr);
 
-    while let Some(chunk) = chunks.next() {
-        match chunk {
-            Chunk::Push(_) => stack += 1,
-            Chunk::Pop(_) => match stack.checked_sub(1) {
-                Some(n) => stack = n,
-                None => return chunks.as_slice(),
-            },
-            _ => {}
+        let ts = TokenStreamBuilder::new(drain).drain_to_token_stream();
+        let mut group = Group::new(hdr.delim, ts);
+        if let Some(span) = span {
+            group.set_span(span);
         }
+        group
     }
 
-    &[]
+    #[must_use = "`close_group` returns a group, rather than enqueuing it."]
+    pub fn close_group(&mut self) -> Group {
+        self.close_group_with_span(None)
+    }
+
+    pub fn close_and_enqueue_group(&mut self) {
+        let group = self.close_group();
+        self.push(group);
+    }
+
+    pub fn display(&self) -> impl fmt::Display {
+        DisplayChunks(&self.chunks)
+    }
 }
 
-fn token_size_hint_for_chunks(chunks: &[Chunk]) -> (usize, Option<usize>, bool) {
+fn token_size_hint_for_chunks(chunks: &[Chunk]) -> (usize, Option<usize>) {
     let mut n = 0;
     let mut bounded_above = true;
     let mut chunks = chunks.iter();
 
-    let mut flagged = false;
     while let Some(chunk) = chunks.next() {
         match chunk {
             Chunk::Embed(_) => bounded_above = false,
-            Chunk::Unit(_) => n += 1,
-            Chunk::Push(_) => {
-                // 1 for the group:
-                n += 1;
-                chunks = balance_chunks(chunks.as_slice()).iter()
+            Chunk::PutGroup(_) | Chunk::PutIdent(_) | Chunk::PutLiteral(_) | Chunk::PutPunct(_) => {
+                n += 1
             }
-            // always consumed by balance_chunks
-            Chunk::Pop(_) => {
-                flagged = true;
-                break;
-            }
+            // push group is just element shuffling, i.e. entirely immaterial.
+            Chunk::OpenGroup(_) => (),
         }
     }
 
-    (n, bounded_above.then_some(n), flagged)
+    (n, bounded_above.then_some(n))
 }
 
 macro_rules! impl_extend_for_into_chunk {
@@ -348,52 +370,24 @@ impl From<TokenStream> for TokenQueue {
     fn from(ts: TokenStream) -> TokenQueue {
         TokenQueue {
             chunks: vec![Chunk::Embed(ts)],
-            stack_depth: 0,
+            group_stack_top_ptr: None,
         }
     }
 }
 
 /// "Commits" the token queue by value, constructing a [`TokenStream`] from the contents.
 impl From<TokenQueue> for TokenStream {
-    fn from(q: TokenQueue) -> TokenStream {
-        let mut builder = TokenStreamBuilder::new(q.chunks.into_iter());
-        let ts = builder.drain_to_token_stream();
-        builder.assert_no_trailing_pop();
-        ts
-    }
-}
-
-impl<'a> From<&'a TokenQueue> for TokenStream {
-    fn from(q: &'a TokenQueue) -> TokenStream {
-        let mut builder = TokenStreamBuilder::new(ByRef(q.chunks.iter()));
-        let ts = builder.drain_to_token_stream();
-        builder.assert_no_trailing_pop();
-        ts
-    }
-}
-
-impl<'a> From<&'a mut TokenQueue> for TokenStream {
-    fn from(q: &'a mut TokenQueue) -> TokenStream {
+    fn from(mut q: TokenQueue) -> TokenStream {
         let mut builder = TokenStreamBuilder::new(q.chunks.drain(..));
         let ts = builder.drain_to_token_stream();
-        builder.assert_no_trailing_pop();
         ts
     }
 }
 
 trait ChunkBuf: Iterator<Item = Chunk> {
     fn remaining(&self) -> &[Chunk];
-    fn lookahead(&self, n: usize) -> Option<&Chunk> {
-        self.remaining().get(n)
-    }
-    fn len(&self) -> usize {
-        self.remaining().len()
-    }
-}
-
-impl ChunkBuf for std::vec::IntoIter<Chunk> {
-    fn remaining(&self) -> &[Chunk] {
-        self.as_slice()
+    fn peek(&self) -> Option<&Chunk> {
+        self.remaining().first()
     }
 }
 
@@ -403,76 +397,17 @@ impl<'a> ChunkBuf for std::vec::Drain<'a, Chunk> {
     }
 }
 
-struct ByRef<'a>(std::slice::Iter<'a, Chunk>);
-
-impl<'a> Iterator for ByRef<'a> {
-    type Item = Chunk;
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.size_hint()
-    }
-
-    fn next(&mut self) -> Option<Chunk> {
-        self.0.next().cloned()
-    }
-}
-
-impl<'a> ChunkBuf for ByRef<'a> {
-    fn remaining(&self) -> &[Chunk] {
-        self.0.as_slice()
-    }
-}
-
 /// Parses a buffer of [`Chunk`]s until either EOS or a [`Pop`](Chunk::Pop).
 struct TokenStreamBuilder<S> {
     ts_queue: Option<proc_macro::token_stream::IntoIter>,
     chunks: S,
-    /// The span associated with a trailing [`Pop`](Chunk::Pop).
-    ///
-    /// Note that `Option` is sufficient:
-    /// every pop is preceeded by a push, which ensures that the span is pulled out before it is replaced.
-    last: TsbLast,
-}
-
-#[derive(Debug, Clone)]
-enum TsbLast {
-    Pop(Option<Span>),
-    FallOut,
-}
-
-impl TsbLast {
-    fn take(&mut self) -> Option<Option<Span>> {
-        let s = match self {
-            TsbLast::Pop(span) => Some(*span),
-            TsbLast::FallOut => None,
-        };
-        *self = TsbLast::FallOut;
-        s
-    }
-
-    fn set(&mut self, span: Option<Span>) {
-        match self {
-            TsbLast::Pop(span2) => {
-                panic!("{span:?} overwrote pop span {span2:?}")
-            }
-            TsbLast::FallOut => *self = TsbLast::Pop(span),
-        }
-    }
-
-    fn is_ready(&self) -> bool {
-        match self {
-            TsbLast::Pop(_) => true,
-            TsbLast::FallOut => false,
-        }
-    }
 }
 
 impl<S: ChunkBuf> fmt::Debug for TokenStreamBuilder<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TokenStreamBuilder")
             .field("ts_queue", &self.ts_queue.clone().map(Vec::from_iter))
-            .field("chunks", &FmtChunks(self.chunks.remaining()))
-            .field("last", &self.last)
+            .field("chunks", &self.chunks.remaining())
             .finish()
     }
 }
@@ -481,13 +416,8 @@ impl<S: ChunkBuf> TokenStreamBuilder<S> {
     fn new(chunks: S) -> TokenStreamBuilder<S> {
         TokenStreamBuilder {
             ts_queue: None,
-            last: TsbLast::FallOut,
             chunks,
         }
-    }
-
-    fn assert_no_trailing_pop(&self) {
-        assert!(!self.last.is_ready(), "{POP_NO_PUSH_MSG}");
     }
 
     #[inline(never)]
@@ -497,18 +427,9 @@ impl<S: ChunkBuf> TokenStreamBuilder<S> {
 
     #[inline]
     fn as_unwrapped_streams(&mut self) -> Option<impl Iterator<Item = TokenStream> + '_> {
-        let (n, span) = self
+        let possible = self
             .chunks
             .remaining()
-            .iter()
-            .enumerate()
-            .find_map(|(i, tc)| match tc {
-                &Chunk::Pop(span) => Some((i, Some(span))),
-                _ => None,
-            })
-            .unwrap_or_else(|| (self.chunks.len(), None));
-
-        let possible = self.chunks.remaining()[..n]
             .iter()
             .all(|tc| matches!(tc, Chunk::Embed(_)));
 
@@ -516,21 +437,17 @@ impl<S: ChunkBuf> TokenStreamBuilder<S> {
             return None;
         }
 
-        let ts = self.chunks.by_ref().take(n + 1).filter_map(|tc| match tc {
+        let ts = self.chunks.by_ref().filter_map(|chunk| match chunk {
             Chunk::Embed(ts) => Some(ts),
             _ => None,
         });
-
-        if let Some(span) = span {
-            self.last.set(span);
-        }
 
         Some(ts)
     }
 
     #[inline]
     fn take_as_single_stream(&mut self) -> Option<TokenStream> {
-        let Some(Chunk::Embed(_)) = self.chunks.lookahead(0) else {
+        let Some(Chunk::Embed(_)) = self.chunks.peek() else {
             return None;
         };
 
@@ -538,18 +455,7 @@ impl<S: ChunkBuf> TokenStreamBuilder<S> {
             unreachable!();
         };
 
-        // accepts either [Embed] or [Embed, Pop, ..] since those are both "1-stream".
-        // NB: [Push, .., Pop, ..] is kinda also 1-stream but we don't consider it to be rn.
-        match self.chunks.lookahead(0) {
-            Some(&Chunk::Pop(span)) => {
-                // skip the pop in the parent stream.
-                self.chunks.next();
-                self.last.set(span);
-                Some(ts)
-            }
-            None => Some(ts),
-            Some(_) => None,
-        }
+        Some(ts)
     }
 
     #[inline]
@@ -603,8 +509,7 @@ impl<S: ChunkBuf> Iterator for TokenStreamBuilder<S> {
     type Item = TokenTree;
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let (min, max, _) = token_size_hint_for_chunks(self.chunks.remaining());
-        (min, max)
+        token_size_hint_for_chunks(self.chunks.remaining())
     }
 
     fn next(&mut self) -> Option<TokenTree> {
@@ -619,26 +524,11 @@ impl<S: ChunkBuf> Iterator for TokenStreamBuilder<S> {
                 self.ts_queue = Some(ts_queue);
                 self.next()
             }
-            Some(Chunk::Unit(tt)) => Some(tt),
-            Some(Chunk::Push(delim)) => {
-                // let s = format!("{self:?}");
-                // NB: recursion.
-                let ts = self.drain_to_token_stream();
-                let mut group = Group::new(delim, ts);
-                match self.last.take() {
-                    Some(Some(span)) => group.set_span(span),
-                    Some(None) => {}
-                    None => {
-                        panic!("{PUSH_NO_POP_MSG}")
-                    }
-                };
-
-                Some(group.into())
-            }
-            Some(Chunk::Pop(span)) => {
-                self.last.set(span);
-                None
-            }
+            Some(Chunk::PutGroup(tt)) => Some(tt.into()),
+            Some(Chunk::PutIdent(tt)) => Some(tt.into()),
+            Some(Chunk::PutPunct(tt)) => Some(tt.into()),
+            Some(Chunk::PutLiteral(tt)) => Some(tt.into()),
+            Some(Chunk::OpenGroup(_)) => panic!("{PUSH_NO_POP_MSG}"),
         }
     }
 }

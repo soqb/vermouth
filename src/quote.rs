@@ -105,8 +105,8 @@ macro_rules! quote {
 
 /// Extends an existing buffer with quasi-quoted Rust source.
 ///
-/// One syntax is supported:
-/// `try_extend_quote!(buf, { my tokens })` writes `my tokens` into `buf`.
+/// This syntax is supported:
+/// `try_extend_quote!(buf, { .. })` writes `..` into `buf`.
 ///
 /// See [`quote`](crate::quote!) for the details of quasi-quoting syntax.
 #[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
@@ -117,12 +117,6 @@ macro_rules! try_extend_quote {
             #[allow(unused_imports)]
             use $crate::{TtResult, TryToTokens as _, ඞ_macro_exports::{self as m, proc_macro, core, Spec, SpecLiteralQuote as _}};
             let _q = $q;
-            #[cfg(not(debug_assertions))]
-            {
-                let mut v = 0usize;
-                $crate::ඞ_macro_quote_reserve_size! { v $($t)* };
-                $crate::TokenQueue::reserve(_q, v);
-            }
             $crate::ඞ_macro_extend_quote_impl! { _q 'esc $($t)* };
             break 'esc TtResult::Ok(());
     }};
@@ -154,12 +148,6 @@ macro_rules! ඞ_macro_inline_quote_impl {
     ($q:ident $s:lifetime $($t:tt)*) => {
         let mut $q = $crate::TokenQueue::new();
         let _q = &mut $q;
-        #[cfg(not(debug_assertions))]
-        {
-            let mut v = 0usize;
-            $crate::ඞ_macro_quote_reserve_size! { v $($t)* };
-            $crate::TokenQueue::reserve(_q, v);
-        }
         $crate::ඞ_macro_extend_quote_impl! { _q $s $($t)* };
     };
 }
@@ -180,6 +168,8 @@ macro_rules! ඞ_macro_extend_quote_impl {
         }
     };
     ($q:ident $s:lifetime $($t:tt)*) => {
+        // #[cfg(not(debug_assertions))]
+        // $crate::TokenQueue::reserve($q, $crate::ඞ_macro_quote_reserve_size! { $($t)* });
         $crate::ඞ_macro_quote_matrixed! {
             ඞ_macro_quote_emit
             { $q $s }
@@ -226,18 +216,23 @@ macro_rules! ඞ_macro_quote_emit {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! ඞ_macro_quote_reserve_size {
-    ($v:ident) => { };
-    ($v:ident @) => { };
-    ($v:ident $t:tt) => {
-        $crate::ඞ_macro_quote_reserve_size_tt! { $v {$t} }
-    };
-    ($v:ident @ $n:ident) => {
-        $v = $v.wrapping_add($n.queue_size_hint().0);
-    };
-    ($v:ident $($t:tt)*) => {
+    () => { 0usize };
+    (@) => { 0usize };
+    ($t:tt) => {{
+        let mut v = 0usize;
+        $crate::ඞ_macro_quote_reserve_size_tt! { v {$t} }
+        v
+    }};
+    (@ $n:ident) => {{
+        let mut v = 0usize;
+        v = v.wrapping_add($n.queue_size_hint().0);
+        v
+    }};
+    ($($t:tt)*) => {{
+        let mut v = 0usize;
         $crate::ඞ_macro_quote_matrixed! {
             ඞ_macro_quote_reserve_size_emit
-            $v
+            v
             { _ _ _ _ _ $({$t})* }
             { _ _ _ _ $({$t})* _ }
             { _ _ _ $({$t})* _ _ }
@@ -245,32 +240,30 @@ macro_rules! ඞ_macro_quote_reserve_size {
             { _ $({$t})* _ _ _ _ }
             { $({$t})* _ _ _ _ _ }
         }
-    };
+        v
+    }};
 }
 
+// NB: not a great metric, but overallocating is worse by benchmark.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! ඞ_macro_quote_reserve_size_tt {
-        ($v:ident _) => { };
-        ($v:ident {($($t:tt)*)}) => {
-            $v = $v.wrapping_add(2usize);
-            $crate::ඞ_macro_quote_reserve_size! { $v $($t)* }
-        };
-        ($v:ident {{$($t:tt)*}}) => {
-            $v = $v.wrapping_add(2usize);
-            $crate::ඞ_macro_quote_reserve_size! { $v $($t)* }
-        };
-        ($v:ident {[$($t:tt)*]}) => {
-            $v = $v.wrapping_add(2usize);
-            $crate::ඞ_macro_quote_reserve_size! { $v $($t)* }
-        };
-        ($v:ident {$lt:lifetime}) => {
-            $v = $v.wrapping_add(2usize);
-        };
-        ($v:ident {$t:tt}) => {
-            $v = $v.wrapping_add(1usize);
-        };
-
+    ($v:ident _) => {};
+    ($v:ident ()) => {
+        $v = $v.wrapping_add(1usize);
+    };
+    ($v:ident {}) => {
+        $v = $v.wrapping_add(1usize);
+    };
+    ($v:ident []) => {
+        $v = $v.wrapping_add(1usize);
+    };
+    ($v:ident {$lt:lifetime}) => {
+        $v = $v.wrapping_add(2usize);
+    };
+    ($v:ident {$t:tt}) => {
+        $v = $v.wrapping_add(1usize);
+    };
 }
 
 #[doc(hidden)]
@@ -303,7 +296,7 @@ macro_rules! ඞ_macro_quote_parse_windowed {
     };
     ($m:ident $cx:tt $_0:tt {@} {$n:ident} {($($t:tt)*)} {*} $a:tt) => {
         $crate::$m! { rep $cx $n $($t)* }
-        $crate::ඞ_macro_quote_window6! { $q $s _ _ _ _ _ $a }
+        $crate::ඞ_macro_quote_parse_windowed! { $q $s _ _ _ _ _ $a }
     };
     ($m:ident $cx:tt $_0:tt {@} {$n:ident} {($($t:tt)*)} {$sep:tt} {*}) => {
         $crate::$m! { seprep $cx $n $sep $($t)* }
@@ -407,20 +400,29 @@ for_all_punct_seqs!(
         ($q:ident $s:lifetime {_}) => {
             m::push_underscore($q);
         };
+        ($q:ident $s:lifetime ()) => {
+            m::push_empty_group(proc_macro::Delimiter::Parenthesis);
+        };
+        ($q:ident $s:lifetime {}) => {
+            m::push_empty_group(proc_macro::Delimiter::Brace);
+        };
+        ($q:ident $s:lifetime []) => {
+            m::push_empty_group(proc_macro::Delimiter::Bracket);
+        };
         ($q:ident $s:lifetime {($($t:tt)*)}) => {
             $crate::TokenQueue::open_group($q, proc_macro::Delimiter::Parenthesis);
             $crate::ඞ_macro_extend_quote_impl! { $q $s $($t)* };
-            $crate::TokenQueue::close_group($q);
+            $crate::TokenQueue::close_and_enqueue_group($q);
         };
         ($q:ident $s:lifetime {{$($t:tt)*}}) => {
             $crate::TokenQueue::open_group($q, proc_macro::Delimiter::Brace);
             $crate::ඞ_macro_extend_quote_impl! { $q $s $($t)* };
-            $crate::TokenQueue::close_group($q);
+            $crate::TokenQueue::close_and_enqueue_group($q);
         };
         ($q:ident $s:lifetime {[$($t:tt)*]}) => {
             $crate::TokenQueue::open_group($q, proc_macro::Delimiter::Bracket);
             $crate::ඞ_macro_extend_quote_impl! { $q $s $($t)* };
-            $crate::TokenQueue::close_group($q);
+            $crate::TokenQueue::close_and_enqueue_group($q);
         };
         ($q:ident $s:lifetime {$id:ident}) => {
             if let TtResult::Err(e) = const { m::parse_ident(stringify!($id)) }.try_extend_tokens($q) {

@@ -3,5 +3,5 @@ name = "benches"
 edition = "2024"
 
 [dependencies]
-macrobench = { path = "../macrobench" }
+macrobench = { workspace = true }
 
