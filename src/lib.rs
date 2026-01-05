@@ -129,6 +129,8 @@ pub mod attributes;
 mod tests {
     use proc_macro::{Ident, Literal, Span, TokenStream, TokenTree};
 
+    #[cfg(feature = "attributes")]
+    use crate::TtResult;
     use crate::{
         Expected, Parse, Parser, ParserPos, Result, Spanned, attributes::Attribute, punct_pat,
         quote,
@@ -137,9 +139,9 @@ mod tests {
     ඞ_declare_test!();
 
     #[test]
-    fn parsing() {
-        let tokens = quote! { a + b == c };
-        let ref mut cx = Parser::new(tokens.into(), Span::call_site());
+    fn parsing() -> TtResult<()> {
+        let tokens = quote! { a + b == c }.try_into()?;
+        let ref mut cx = Parser::new(tokens, Span::call_site());
         assert_eq!(
             cx.eat_ident().map(Spanned::from).map(|s| s == "a"),
             Ok(true),
@@ -154,6 +156,7 @@ mod tests {
             cx.eat_ident().map(Spanned::from).map(|s| s == "c"),
             Ok(true),
         );
+        Ok(())
     }
 
     #[test]
@@ -274,7 +277,7 @@ mod tests {
     }
 
     #[test]
-    fn quote_literals() {
+    fn quote_literals() -> TtResult<()> {
         let quoted = quote! {
             144
             12u8
@@ -288,7 +291,8 @@ mod tests {
             br#"borbar"#
             'x'
             b'y'
-        };
+        }
+        .try_into()?;
         let manual = [
             tt(Literal::u8_unsuffixed(144)),
             tt(Literal::u8_suffixed(12)),
@@ -305,14 +309,16 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        assert_streams_match(quoted.into(), manual);
+        assert_streams_match(quoted, manual);
+
+        Ok(())
     }
 
     #[test]
     #[cfg(feature = "attributes")]
-    fn attributes() {
+    fn attributes() -> TtResult<()> {
         let tokens = quote! { #[foo] #![bar] };
-        let ref mut cx = Parser::new(tokens.into(), Span::call_site());
+        let ref mut cx = Parser::new(tokens.try_into()?, Span::call_site());
 
         struct Foo;
         struct Bar;
@@ -351,5 +357,7 @@ mod tests {
             <Attribute<Foo, Bar>>::parse(cx),
             Ok(Attribute::Inner { contents: Bar, .. }),
         ));
+
+        Ok(())
     }
 }

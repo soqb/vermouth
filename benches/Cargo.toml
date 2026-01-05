@@ -2,6 +2,10 @@
 name = "benches"
 edition = "2024"
 
+[[bin]]
+name = "benches"
+harness = false
+
 [dependencies]
 macrobench = { workspace = true }
 

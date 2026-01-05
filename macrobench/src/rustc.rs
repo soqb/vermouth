@@ -79,7 +79,7 @@ impl ProcessFailed {
 pub enum JobError {
     Io(io::Error),
     Failed(ProcessFailed),
-    Json(facet_json::JsonError),
+    Json(facet_json::DeserializeError<facet_json::JsonError>),
     MissingMeasurement(String),
 }
 
@@ -114,8 +114,8 @@ impl From<io::Error> for JobError {
     }
 }
 
-impl From<facet_json::JsonError> for JobError {
-    fn from(value: facet_json::JsonError) -> Self {
+impl From<facet_json::DeserializeError<facet_json::JsonError>> for JobError {
+    fn from(value: facet_json::DeserializeError<facet_json::JsonError>) -> Self {
         JobError::Json(value)
     }
 }

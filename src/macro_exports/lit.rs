@@ -4,7 +4,7 @@ use std::{convert::Infallible, ffi::CStr, str::FromStr};
 
 use proc_macro::{Literal, TokenStream};
 
-use crate::{ReparseError, TokenQueue, TryToTokens, TtResult, ctfe};
+use crate::{ReparseError, TokenQueue, TryIntoTokens, TtResult, ctfe};
 
 /// A hacky representation of a partially-parsed literal.
 ///
@@ -27,11 +27,11 @@ impl<T: LitContents, const REGIME: u8> DelayedLiteral<T, REGIME> {
     }
 }
 
-impl<T: LitContents, const REGIME: u8> TryToTokens for DelayedLiteral<T, REGIME> {
+impl<T: LitContents, const REGIME: u8> TryIntoTokens for DelayedLiteral<T, REGIME> {
     type Error = Infallible;
 
     #[inline]
-    fn try_extend_tokens(&self, buf: &mut TokenQueue) -> TtResult<()> {
+    fn try_extend_tokens(self, buf: &mut TokenQueue) -> TtResult<()> {
         let resolution = const { Regime::parse(REGIME, T::PARSERS) }.unwrap();
         buf.push(resolution(self.data));
         Ok(())
@@ -61,47 +61,45 @@ pub enum Regime {
 }
 
 impl Regime {
-    const fn recognize_suffixed_int(s: &[u8]) -> bool {
-        if let Some(suffix) = ctfe::bytes_lastn(s, 5) {
-            const_bytes_match!(suffix; {
-                b"usize" | b"isize" => return true,
-            })
+    const fn is_suffixed_int(s: &[u8]) -> bool {
+        match s {
+            [.., b'u' | b'i', b's', b'i', b'z', b'e']
+            | [.., b'u' | b'i', b'1', b'2', b'8']
+            | [.., b'u' | b'i', b'6', b'4']
+            | [.., b'u' | b'i', b'3', b'2']
+            | [.., b'u' | b'i', b'1', b'6']
+            | [.., b'u' | b'i', b'8'] => true,
+            _ => false,
         }
-
-        if let Some(suffix) = ctfe::bytes_lastn(s, 4) {
-            const_bytes_match!(suffix; {
-                b"u128" | b"i128" => return true,
-            })
-        }
-
-        if let Some(suffix) = ctfe::bytes_lastn(s, 3) {
-            const_bytes_match!(suffix; {
-                b"u64" | b"i64" | b"u32" | b"i32" | b"u16" | b"i16" => return true,
-            })
-        }
-
-        if let Some(suffix) = ctfe::bytes_lastn(s, 2) {
-            const_bytes_match!(suffix; {
-                b"u8" | b"i8" => return true,
-            })
-        }
-
-        false
     }
 
-    const fn recognize_suffixed_float(s: &[u8]) -> bool {
-        if let Some(suffix) = ctfe::bytes_lastn(s, 3) {
-            const_bytes_match!(suffix; {
-                b"f64" | b"f32" => return true,
-            })
-        }
-
-        false
-    }
-    const fn recognize_suffixed_number(s: &[u8]) -> Regime {
-        if Regime::recognize_suffixed_int(s) {
+    const fn recognize_int(s: &[u8]) -> Regime {
+        if Regime::is_suffixed_int(s) {
             Regime::IntSuffixed
-        } else if Regime::recognize_suffixed_float(s) {
+        } else {
+            Regime::Int
+        }
+    }
+
+    const fn is_suffixed_float(s: &[u8]) -> bool {
+        match s {
+            [.., b'f', b'6', b'4'] | [.., b'f', b'3', b'2'] => true,
+            _ => false,
+        }
+    }
+
+    const fn recognize_float(s: &[u8]) -> Regime {
+        if Regime::is_suffixed_float(s) {
+            Regime::FloatSuffixed
+        } else {
+            Regime::Float
+        }
+    }
+
+    const fn recognize_number(s: &[u8]) -> Regime {
+        if Regime::is_suffixed_int(s) {
+            Regime::IntSuffixed
+        } else if Regime::is_suffixed_float(s) {
             Regime::FloatSuffixed
         } else {
             Regime::Int
@@ -109,103 +107,21 @@ impl Regime {
     }
 
     pub const fn recognize(input: &str) -> Regime {
-        let mut s = input.as_bytes();
-        macro_rules! parse_byte {
-            ($($arm:pat $(if $g:expr)? => $ex:expr,)*) => {{
-                let (s2, c) = match s.split_first() {
-                    Some((c, s)) => {
-                        (s, Some(c))
-                    },
-                    None => (s, None),
-                };
-
-                #[allow(unreachable_patterns)]
-                return match c {
-                    $($arm $(if $g)? => {
-                        let _x = $ex;
-                        #[allow(unreachable_code, unused_assignments)]
-                        {
-                            s = s2;
-                            _x
-                        }
-                    })*
-                    _ => return Regime::Unknown,
-                };
-            }};
+        let s = input.as_bytes();
+        match s {
+            [b'0', b'x' | b'b' | b'o', s @ ..] => Regime::recognize_int(s),
+            [b'0'..=b'9', s @ ..] if ctfe::bytes_any(s, b'.') => Regime::recognize_float(s),
+            [b'0'..=b'9', s @ ..] => Regime::recognize_number(s),
+            [b'b', b'"', ..] => Regime::ByteString,
+            [b'b', b'\'', ..] => Regime::ByteCharacter,
+            [b'b', b'r', s @ ..] if ctfe::bytes_any(s, b'"') => Regime::ByteString,
+            [b'c', b'"', ..] => Regime::CString,
+            [b'c', b'r', s @ ..] if ctfe::bytes_any(s, b'"') => Regime::CString,
+            [b'"', ..] => Regime::ByteString,
+            [b'\'', ..] => Regime::ByteCharacter,
+            [b'r', s @ ..] if ctfe::bytes_any(s, b'"') => Regime::ByteString,
+            _ => Regime::Unknown,
         }
-
-        // piss-simple parser tree.
-        parse_byte! {
-            Some(b'0') => parse_byte! {
-                Some(b'x' | b'b' | b'o') => Regime::recognize_suffixed_number(s),
-                _ if ctfe::bytes_any(s, b'.') => if Regime::recognize_suffixed_float(s)  { Regime::FloatSuffixed } else { Regime::Float },
-                _ => Regime::recognize_suffixed_number(s),
-            },
-            Some(b'1'..=b'9') => parse_byte! {
-                _ if ctfe::bytes_any(s, b'.') => if Regime::recognize_suffixed_float(s)  { Regime::FloatSuffixed } else { Regime::Float },
-                _ => Regime::recognize_suffixed_number(s),
-            },
-            Some(b'b') => parse_byte! {
-                Some(b'"') => Regime::ByteString,
-                Some(b'\'') => Regime::ByteCharacter,
-                Some(b'r') if ctfe::bytes_any(s, b'"') => Regime::ByteString,
-            },
-            Some(b'c') => parse_byte! {
-                Some(b'"') => Regime::CString,
-                Some(b'r') if ctfe::bytes_any(s, b'"') => Regime::CString,
-            },
-            Some(b'"') => Regime::String,
-            Some(b'\'') => Regime::Character,
-            Some(b'r') if ctfe::bytes_any(s, b'"') => Regime::String,
-        }
-
-        // match s.as_bytes().split_first() {
-        //     Some(b'0'..=b'9') => match ,
-        //     Some(b'b') => Som,
-        //     None => todo!(),
-        // }
-
-        // const fn wing_string(s: &str, p: u8) -> Option<(&str, &str)> {
-        //     if let Some((prefix, s2)) = ctfe::split_around(s, p)
-        //         && let Some((inner, _suffix)) = ctfe::rsplit_around(s2, p)
-        //     {
-        //         Some((prefix, inner))
-        //     } else {
-        //         None
-        //     }
-        // }
-
-        // if let Some((prefix, inner)) = wing_string(s, b'#')
-        //     && let Some(_) = wing_string(inner, b'"')
-        // {
-        //     const_str_match!(prefix; {
-        //         "br" => Some(Regime::ByteString),
-        //         "cr" => Some(Regime::CString),
-        //         "r" => Some(Regime::String),
-        //         _ => None,
-        //     })
-        // } else if let Some((prefix, _)) = wing_string(s, b'"') {
-        //     // string literal:
-        //     const_str_match!(prefix; {
-        //         "b" => Some(Regime::ByteString),
-        //         "c" => Some(Regime::CString),
-        //         "" => Some(Regime::String),
-        //         _ => None,
-        //     })
-        // } else if let Some((prefix, _)) = wing_string(s, b'\'') {
-        //     // char literal:
-        //     const_str_match!(prefix; {
-        //         "b" => Some(Regime::ByteCharacter),
-        //         "" => Some(Regime::Character),
-        //         _ => None,
-        //     })
-        // } else if let Some(regime) = Regime::recognize_suffixed_numeric(s) {
-        //     Some(regime)
-        // } else if ctfe::bytes_contain(s.as_bytes(), b'.') {
-        //     Some(Regime::Float { suffixed: false })
-        // } else {
-        //     Some(Regime::Int { suffixed: false })
-        // }
     }
 
     pub const fn parse<T>(

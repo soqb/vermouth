@@ -1,52 +1,93 @@
-use crate::for_all_punct_seqs;
+use std::{convert::Infallible, error::Error};
 
-/// The fallible variant of [`quote`](crate::quote!).
-///
-/// # Errors
-///
-/// Formally, `try_quote` always evaluates to a [`TtResult<TokenStream, E>`](crate::TtResult) for some [error type] `E`.
-///
-/// [error type]: crate::TryToTokens::Error
-///
-/// Due to a plurality of error types and the implementation of [`TryToTokens`](crate::TryToTokens),
-/// `try_quote` cannot generally infer an appropriate value of `E`.
-/// Usually, [`Infallible`](std::convert::Infallible) is sufficient
-/// since [`TtError`](crate::TtError) already encapsulates the errors that arise from e.g. quoting literals.
-#[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
-#[macro_export]
-macro_rules! try_quote {
-    {} => {
-        $crate::ඞ_macro_exports::ok($crate::ඞ_macro_exports::proc_macro::TokenStream::new())
-    };
-    {$($t:tt)*} => {
-        'esc: {
-            #[allow(unused_imports)]
-            use $crate::{TtResult, TryToTokens as _, ඞ_macro_exports::{self as m, proc_macro, core, Spec, SpecLiteralQuote as _}};
-            $crate::ඞ_macro_inline_quote_impl! { q 'esc $($t)* }
-            break 'esc TtResult::Ok(q);
-        }
-    };
+use proc_macro::TokenStream;
+
+use crate::{TokenQueue, TryIntoTokens, TryToTokens, TtError, TtResult, for_all_punct_seqs};
+
+mod seal {
+    pub trait Reflex {
+        type This: ?Sized;
+    }
+    impl<T: ?Sized> Reflex for T {
+        type This = T;
+    }
 }
 
-#[doc(hidden)]
-#[macro_export]
-macro_rules! ඞ_macro_bail_specialized {
-    ($e:expr) => {{
-        #[allow(unused)]
-        let y = match () {
-            () => $crate::ඞ_macro_exports::Spec::empty(),
-            () => {
-                let z = loop {};
-                return z;
-                $crate::ඞ_macro_exports::Spec::new(&raw const z)
-            }
-        };
-        use $crate::ඞ_macro_exports::SpecQuoteBail as _;
-        return (&&y).bail($e);
-    }};
+/// A lazily-evaluated sequence of quoted tokens (i.e. what [`quote`](crate::quote!) evaluates to).
+///
+/// See [the `quote` macro](crate::quote!) for more.
+#[derive(Clone, Copy)]
+pub struct Transcriber<F>(F);
+impl<E, F> Transcriber<F>
+where
+    E: Error + From<Infallible>,
+    F: FnOnce(&mut TokenQueue) -> TtResult<(), E>,
+{
+    pub fn from_fn(f: F) -> Transcriber<F> {
+        Transcriber(f)
+    }
+
+    pub fn ascribe<EE>(self) -> Transcriber<F>
+    where
+        EE: seal::Reflex<This = E>,
+    {
+        self
+    }
 }
 
-/// Quasi-quoting for Rust source.
+impl<E, F> TryIntoTokens for Transcriber<F>
+where
+    E: Error + From<Infallible>,
+    F: FnOnce(&mut TokenQueue) -> TtResult<(), E>,
+{
+    type Error = E;
+
+    fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<(), E> {
+        (self.0)(q)
+    }
+}
+
+impl<E, F> TryToTokens for Transcriber<F>
+where
+    E: Error + From<Infallible>,
+    F: Fn(&mut TokenQueue) -> TtResult<(), E>,
+{
+    type Error = E;
+
+    fn try_extend_tokens_ref(&self, q: &mut TokenQueue) -> TtResult<(), E> {
+        (self.0)(q)
+    }
+}
+
+impl<E, F> TryFrom<Transcriber<F>> for TokenStream
+where
+    E: Error + From<Infallible>,
+    F: FnOnce(&mut TokenQueue) -> TtResult<(), E>,
+{
+    type Error = TtError<E>;
+
+    fn try_from(value: Transcriber<F>) -> TtResult<TokenStream, E> {
+        value.try_into_tokens().map(TokenStream::from)
+    }
+}
+
+impl<E, F> TryFrom<&Transcriber<F>> for TokenStream
+where
+    E: Error + From<Infallible>,
+    F: Fn(&mut TokenQueue) -> TtResult<(), E>,
+{
+    type Error = TtError<E>;
+
+    fn try_from(value: &Transcriber<F>) -> TtResult<TokenStream, E> {
+        value.try_to_tokens().map(TokenStream::from)
+    }
+}
+
+/// Lazy quasi-quoting for Rust source.
+///
+/// Returns a value implementing [`TryToTokens`] ([`Transcriber`]) which can be used to build a [`TokenStream`].
+///
+/// The transcriber does not contain any tokens, but instead a [`Fn`]-closure which appends to a [`TokenQueue`].
 ///
 /// # Interpolation
 ///
@@ -57,14 +98,7 @@ macro_rules! ඞ_macro_bail_specialized {
 ///   `foo` must implement [`TryToTokens`](crate::TryToTokens).
 /// * `quote! { @@ }` evaluates to just `@`.
 ///
-/// # Bail Wizardry
-///
-/// On encountering an error, we leverage some type inference wizardry
-/// to make this macro usually what you want:
-/// - In a function returning `TtResult<T, E>`, we propogate the error to the caller.
-/// - In any other context, we panic by unwrapping.
-///
-/// If the default behavior is wrong, try using [`try_quote`] and specifying types exactly.
+/// If the default behavior is wrong, try using [`Transcriber::ascribe`] to specify the error type exactly.
 ///
 /// # Escaping `@@@`
 ///
@@ -93,45 +127,29 @@ macro_rules! ඞ_macro_bail_specialized {
 #[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
 #[macro_export]
 macro_rules! quote {
-    {} => { $crate::TokenQueue::new() };
-    {$($t:tt)*} => {{
-        let tokens = $crate::try_quote! { $($t)* };
-        match tokens {
-            $crate::TtResult::Ok(buf) => buf,
-            $crate::TtResult::Err(err) => $crate::ඞ_macro_bail_specialized!(err),
-        }
-    }};
-}
-
-/// Extends an existing buffer with quasi-quoted Rust source.
-///
-/// This syntax is supported:
-/// `try_extend_quote!(buf, { .. })` writes `..` into `buf`.
-///
-/// See [`quote`](crate::quote!) for the details of quasi-quoting syntax.
-#[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
-#[macro_export]
-macro_rules! try_extend_quote {
-    ($q:expr, { $($t:tt)* }) => {
-        'esc: {
-            #[allow(unused_imports)]
-            use $crate::{TtResult, TryToTokens as _, ඞ_macro_exports::{self as m, proc_macro, core, Spec, SpecLiteralQuote as _}};
-            let _q = $q;
-            $crate::ඞ_macro_extend_quote_impl! { _q 'esc $($t)* };
-            break 'esc TtResult::Ok(());
-    }};
-}
-
-/// Returns an object implementing [`TryToTokens`](crate::TryToTokens) which represents some quasi-quoted Rust source.
-///
-/// See [`quote`](crate::quote!) for the details of quasi-quoting syntax.
-#[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
-#[macro_export]
-macro_rules! delay_quote {
     ($($t:tt)*) => {
-        $crate::ඞ_macro_exports::make_fn(
-            |buf| $crate::try_extend_quote!(buf, { $($t)* }),
+        $crate::Transcriber::from_fn(
+            |_q| '_esc: {
+                #[allow(unused_imports)]
+                use $crate::{TtResult, TryIntoTokens as _, ඞ_macro_exports::{self as m, proc_macro, core, Spec, SpecLiteralQuote as _}};
+                $crate::ඞ_macro_extend_quote_impl! { _q '_esc $($t)* };
+                TtResult::Ok(())
+            },
         )
+    };
+}
+
+/// Quotes a single token (either a literal, an ident, or a lifetime) in exactly the format supplied.
+#[macro_export]
+macro_rules! verbatim {
+    ($lt:lifetime) => {
+        $crate::ඞ_macro_exports::Verbatim($crate::ඞ_macro_exports::core::stringify!($lt))
+    };
+    ($id:ident) => {
+        $crate::ඞ_macro_exports::Verbatim($crate::ඞ_macro_exports::core::stringify!($id))
+    };
+    ($lit:literal) => {
+        $crate::ඞ_macro_exports::Verbatim($crate::ඞ_macro_exports::core::stringify!($lit))
     };
 }
 
@@ -206,7 +224,7 @@ macro_rules! ඞ_macro_quote_emit {
             core::stringify!($t),
             "` following `@` is reserved.\n\
             help: use `@@` to quote a single `@` symbol.\n\
-            help: see `vermouth::try_quote` for documentation.",
+            help: see `vermouth::quote` for documentation.",
         ));
     };
     (triple_at $cx:tt) => {

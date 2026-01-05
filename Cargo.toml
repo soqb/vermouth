@@ -30,8 +30,7 @@ macrobench = { version = "0.1.0", path = "macrobench" }
 [workspace.dependencies.proc-macro2]
 # we lock the version to a range since there's no tangible guarantee
 # that `proc-macro2` matches `proc_macro` in enough detail.
-version = ">=1.0.103, <=1.0.103"
-
+version = ">=1.0.103, <=1.0.104"
 
 [dependencies]
 smallvec = { workspace = true }
@@ -50,11 +49,6 @@ complete = ["quote", "attributes", "warnings"]
 parse = []
 ## Enables [quasi quoting](crate::quote!).
 quote = []
-## Ensures (where possible) that quoted tokens are emitted verbatim, at the cost of performance.
-##
-## For example, this disables literal preprocessing, so `r##"foobar"##` does not become `"foobar"`.
-## Note that integer literal suffixes are always preseved.
-quote-verbatim = []
 ## Provides support and utilities for parsing and handling Rust attributes.
 attributes = ["parse"]
 ## Enables emitting diagnostic warnings through the `vermouth::Diagnostic` API.

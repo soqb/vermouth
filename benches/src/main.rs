@@ -1,9 +1,12 @@
 use macrobench::rustc::*;
 use macrobench::*;
 
-fn bench_main(cx: &Bencher) {
-    much_nesting(cx);
-    many_tokens(cx);
+fn main() {
+    macrobench::main("vermouth", |cx| {
+        much_nesting(cx);
+        many_literals(cx);
+        many_tokens(cx);
+    })
 }
 
 fn bench_job(
@@ -19,7 +22,7 @@ fn bench_job(
     cfg.rustflags = Some(format!("-Copt-level={lvl}").into());
 
     let bench = group.bench(&format!("{name}-o{lvl}"), Time);
-    let dir = format!("target/bench/{dir}");
+    let dir = format!("../target/bench/{dir}");
 
     MarkEnv { n: 4 }.measure(
         || target.new_job(&cfg, &dir, i as u64).run(),
@@ -31,13 +34,11 @@ fn bench_job(
     );
 }
 
-const OLVL: &[&str] = &["0", "1", "2", "3" /*"s", "z"*/];
+const OLVL: &[&str] = &["0", "1", "2", "3" /*, "s", "z"*/];
 
 fn many_tokens(cx: &Bencher) {
-    let mut target = Target::from_project(
-        "benches/compile-fodder/many-tokens/Cargo.toml",
-        Scenario::Fulldeps,
-    );
+    let mut target =
+        Target::from_project("compile-fodder/many-tokens/Cargo.toml", Scenario::Fulldeps);
     target.rustflags = vec!["-Copt-level=0".into()];
     target.default_features = false;
 
@@ -81,11 +82,55 @@ fn many_tokens(cx: &Bencher) {
     run_for_all_opts(&target_dtolnay, "dtolnay");
 }
 
-fn much_nesting(cx: &Bencher) {
+fn many_literals(cx: &Bencher) {
     let mut target = Target::from_project(
-        "benches/compile-fodder/much-nesting/Cargo.toml",
+        "compile-fodder/many-literals/Cargo.toml",
         Scenario::Fulldeps,
     );
+    target.rustflags = vec!["-Copt-level=0".into()];
+    target.default_features = false;
+
+    let target_vermouth = {
+        let mut target = target.clone();
+        target.features = vec!["vermouth".into()];
+        target
+    };
+
+    let target_dtolnay = {
+        let mut target = target.clone();
+        target.features = vec!["dtolnay".into()];
+        target
+    };
+
+    target.setup().unwrap();
+
+    let frontend_time = cx.group("many-literals");
+
+    let bench_job = |target: &Target, name: &str, i: u64, lvl: &str| {
+        bench_job(
+            &frontend_time,
+            target,
+            name,
+            "many-literals",
+            "many_literals",
+            i,
+            lvl,
+        )
+    };
+
+    let run_for_all_opts = |target: &Target, name: &str| {
+        for (i, lvl) in OLVL.iter().enumerate() {
+            bench_job(target, name, i as u64, lvl)
+        }
+    };
+
+    run_for_all_opts(&target_vermouth, "vermouth");
+    run_for_all_opts(&target_dtolnay, "dtolnay");
+}
+
+fn much_nesting(cx: &Bencher) {
+    let mut target =
+        Target::from_project("compile-fodder/much-nesting/Cargo.toml", Scenario::Fulldeps);
     target.rustflags = vec!["-Copt-level=0".into()];
     target.default_features = false;
 
@@ -125,8 +170,4 @@ fn much_nesting(cx: &Bencher) {
 
     run_for_all_opts(&target_vermouth, "vermouth");
     run_for_all_opts(&target_dtolnay, "dtolnay");
-}
-
-fn main() {
-    macrobench::main("vermouth", bench_main)
 }

@@ -6,8 +6,8 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 crossterm = { version = "0.29.0", features = ["event-stream"], optional = true }
-facet = { version = "0.34.0", default-features = false, optional = true }
-facet-json = { version = "0.34.0", default-features = false, optional = true }
+facet = { version = "0.41.0", default-features = false, optional = true }
+facet-json = { version = "0.41.0", default-features = false, optional = true }
 ratatui = { version = "0.30.0-beta.1", optional = true }
 smol = "2.0.2"
 

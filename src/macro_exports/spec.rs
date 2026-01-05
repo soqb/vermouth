@@ -2,7 +2,7 @@
 
 use std::{error::Error, marker::PhantomData};
 
-use crate::{TokenQueue, TryToTokens, TtError, TtResult};
+use crate::{TokenQueue, TryIntoTokens, TtError, TtResult};
 
 use super::lit::{self, DelayedLiteral, LitContents};
 

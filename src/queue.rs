@@ -1,6 +1,8 @@
-use std::{fmt, num::NonZero};
+use std::{convert::Infallible, fmt, num::NonZero};
 
 use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Span, TokenStream, TokenTree};
+
+use crate::{TryIntoTokens, TtResult};
 
 /// General purpose buffer for token composition.
 ///
@@ -285,9 +287,10 @@ impl TokenQueue {
     }
 
     /// Copies the contents of the given `TokenQueue`
-    pub fn concat(&mut self, rhs: &TokenQueue) {
-        self.chunks.extend_from_slice(&rhs.chunks);
+    pub fn try_extend_from<T: TryIntoTokens>(&mut self, rhs: T) -> TtResult<(), T::Error> {
+        // self.chunks.extend_from_slice(&rhs.chunks);
         // self.stack_depth += rhs.stack_depth;
+        rhs.try_extend_tokens(self)
     }
 
     pub fn open_group(&mut self, delim: Delimiter) {
@@ -372,6 +375,24 @@ impl From<TokenStream> for TokenQueue {
             chunks: vec![Chunk::Embed(ts)],
             group_stack_top_ptr: None,
         }
+    }
+}
+
+impl TryIntoTokens for TokenQueue {
+    type Error = Infallible;
+
+    fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<()> {
+        q.chunks.extend(self.chunks);
+        Ok(())
+    }
+
+    fn try_into_tokens(self) -> TtResult<TokenQueue> {
+        Ok(self)
+    }
+
+    fn queue_size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.len();
+        (n, Some(n))
     }
 }
 

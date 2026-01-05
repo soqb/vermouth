@@ -1,71 +1,16 @@
-//! Library-internal CTFE utilities (mostly string operations).
+//! Library-internal CTFE utilities.
 
-pub const fn split_around(str: &str, p: u8) -> Option<(&str, &str)> {
-    let mut i = 0;
-    while i < str.len() {
-        if str.is_char_boundary(i) {
-            if str.as_bytes()[i] == p {
-                let (a, b) = str.split_at(i);
-                return Some((a, b.split_at(1).1));
-            }
+pub(crate) const fn bytes_any(mut bytes: &[u8], p: u8) -> bool {
+    // impl borrows from stdlib's `is_ascii_simple` for optimal compile-time execution time.
+    // but searching from the left should be generally faster
+    // because most of the time the first byte will succeed.
+    while let [first, rest @ ..] = bytes {
+        if *first == p {
+            break;
         }
 
-        i += 1;
+        bytes = rest;
     }
 
-    None
-}
-
-pub const fn bytes_any(bytes: &[u8], p: u8) -> bool {
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == p {
-            return true;
-        }
-
-        i += 1;
-    }
-
-    false
-}
-
-pub const fn bytes_eq(lhs: &[u8], rhs: &[u8]) -> bool {
-    if lhs.len() != rhs.len() {
-        return false;
-    }
-
-    let mut i = 0;
-    while i < lhs.len() {
-        if lhs[i] != rhs[i] {
-            return false;
-        }
-
-        i += 1;
-    }
-
-    true
-}
-
-pub const fn bytes_lastn(s: &[u8], n: usize) -> Option<&[u8]> {
-    let Some(m) = s.len().checked_sub(n) else {
-        return None;
-    };
-
-    Some(s.split_at(m).1)
-}
-
-macro_rules! const_bytes_match {
-    ($str:expr; { $($($arm:literal)|+ => $body:expr),* $(, _ => $fallback:expr)? $(,)? }) => {
-        if false { unreachable!() }
-        $(
-            else if $($crate::ctfe::bytes_eq($str, $arm))||+ {
-                $body
-            }
-        )*
-        $(
-            else {
-                $fallback
-            }
-        )?
-    };
+    !bytes.is_empty()
 }

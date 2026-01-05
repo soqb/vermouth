@@ -42,7 +42,7 @@ pub fn feel_the_burn(_ts: TokenStream) -> TokenStream {
 
 #[cfg(not(any(feature = "vermouth", feature = "dtolnay")))]
 #[proc_macro]
-pub fn feel_the_burn(ts: TokenStream) -> TokenStream {
+pub fn feel_the_burn(_ts: TokenStream) -> TokenStream {
     // this is our best-effort attempt at isolating the API cost of these approaches.
     // compared to the above, especially on -O3, this iterator is basically free.
     let p = proc_macro::Punct::new(',', proc_macro::Spacing::Alone);

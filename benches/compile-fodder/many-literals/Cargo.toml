@@ -1,0 +1,13 @@
+[workspace]
+members = ["upstream"]
+
+[package]
+name = "many-literals"
+edition = "2024"
+
+[dependencies]
+upstream = { path = "upstream" }
+
+[features]
+vermouth = ["upstream/vermouth"]
+dtolnay = ["upstream/dtolnay"]
