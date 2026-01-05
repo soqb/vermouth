@@ -127,6 +127,8 @@ pub mod attributes;
 
 #[cfg(all(test, feature = "attributes", feature = "quote"))]
 mod tests {
+    use std::convert::Infallible;
+
     use proc_macro::{Ident, Literal, Span, TokenStream, TokenTree};
 
     #[cfg(feature = "attributes")]
@@ -156,6 +158,13 @@ mod tests {
             cx.eat_ident().map(Spanned::from).map(|s| s == "c"),
             Ok(true),
         );
+        Ok(())
+    }
+
+    #[test]
+    fn quote_interpolate() -> TtResult<()> {
+        let a = ();
+        let _tokens: TokenStream = quote! { $a }.ascribe::<Infallible>().try_into().unwrap();
         Ok(())
     }
 

@@ -42,7 +42,7 @@ impl<T: TryIntoTokens> TryIntoTokens for CfgLeaf<T> {
 
     fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<(), T::Error> {
         match self {
-            CfgLeaf::Cfg { meta } => q.try_extend_from(quote! { cfg(@meta) }),
+            CfgLeaf::Cfg { meta } => q.try_extend_from(quote! { cfg($meta) }),
             CfgLeaf::Other(c) => c.try_extend_tokens(q),
         }
     }
@@ -106,10 +106,10 @@ fn cfgable_extend_tokens<T: TryIntoTokens>(
     for meta in rest.iter() {
         q.try_extend_from(quote! { cfg_attr })?;
         q.open_group(Delimiter::Parenthesis);
-        q.try_extend_from(quote! { @meta })?;
+        q.try_extend_from(quote! { $meta })?;
     }
 
-    q.try_extend_from(quote! { @last_meta, @inner })?;
+    q.try_extend_from(quote! { $last_meta, $inner })?;
 
     for _ in 0..rest.len() {
         q.close_and_enqueue_group();
@@ -124,7 +124,7 @@ impl<T> Cfgable<T> {
             return Ok(());
         };
 
-        cfgable_extend_tokens(&rest, quote! { cfg(@last) }, buf)
+        cfgable_extend_tokens(&rest, quote! { cfg($last) }, buf)
     }
 
     /// Reparameterises a `cfg_attr` attribute into a `cfg`.
@@ -257,10 +257,10 @@ impl<E: From<Infallible> + Error, O: TryIntoTokens<Error = E>, I: TryIntoTokens<
     fn try_extend_tokens(self, buf: &mut TokenQueue) -> TtResult<(), E> {
         match self {
             Attribute::Outer { contents } => buf.try_extend_from(quote! {
-                #[@contents]
+                #[$contents]
             }),
             Attribute::Inner { bang, contents } => buf.try_extend_from(quote! {
-                #@bang[@contents]
+                #$bang[$contents]
             }),
         }
     }

@@ -1,26 +1,21 @@
 //! Macro type-specialization implementations.
 
-use std::{error::Error, marker::PhantomData};
+use std::marker::PhantomData;
 
-use crate::{TokenQueue, TryIntoTokens, TtError, TtResult};
+use crate::{TokenQueue, TryIntoTokens, TtResult};
 
 use super::lit::{self, DelayedLiteral, LitContents};
 
 pub struct Spec<T>(PhantomData<T>);
 
 impl<T> Spec<T> {
+    #[inline(always)]
     pub fn empty() -> Spec<T> {
         Spec(PhantomData)
     }
+    #[inline(always)]
     pub fn new(_: *const T) -> Spec<T> {
         Spec::empty()
-    }
-}
-
-pub trait SpecMut: Sized {
-    type Mut;
-    fn consume_unreachable(self) -> Self::Mut {
-        panic!()
     }
 }
 
@@ -38,7 +33,7 @@ pub trait SpecLiteralQuote: Sized {
 impl<T: LitContents> SpecLiteralQuote for Spec<T> {
     type Datum = T;
 
-    #[inline]
+    #[inline(always)]
     fn ඞ_lit_quote<const REGIME: u8>(
         self,
         &datum: &T,
@@ -56,7 +51,7 @@ impl<T: LitContents> SpecLiteralQuote for Spec<T> {
 impl<T> SpecLiteralQuote for &Spec<T> {
     type Datum = T;
 
-    #[inline]
+    #[inline(always)]
     fn ඞ_lit_quote<const REGIME: u8>(
         self,
         _: &T,
@@ -65,33 +60,4 @@ impl<T> SpecLiteralQuote for &Spec<T> {
     ) -> TtResult<()> {
         lit::fallback(text, buf)
     }
-}
-
-pub trait SpecQuoteBail<E>: Sized {
-    type Return;
-    fn bail(self, err: E) -> Self::Return;
-}
-
-impl<T> SpecQuoteBail<TtError<Box<dyn Error>>> for &Spec<T> {
-    type Return = T;
-
-    fn bail(self, err: TtError<Box<dyn Error>>) -> T {
-        panic!("quote failed: {err}")
-    }
-}
-
-impl<T, E> SpecQuoteBail<TtError<E>> for &&Spec<TtResult<T, E>> {
-    type Return = TtResult<T, E>;
-
-    fn bail(self, err: TtError<E>) -> TtResult<T, E> {
-        Err(err)
-    }
-}
-
-impl<'a, T> SpecMut for &'a Spec<T> {
-    type Mut = &'a mut T;
-}
-
-impl<'a, T> SpecMut for Spec<&'a mut T> {
-    type Mut = &'a mut T;
 }

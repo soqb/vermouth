@@ -50,7 +50,9 @@ pub fn feel_the_burn(_ts: TokenStream) -> TokenStream {
                 let z = Some(10);
             }
         };
-        let _ = black_box(TokenStream::from(tokens));
+        #[cfg(feature = "vermouth")]
+        let tokens = tokens.ascribe::<std::convert::Infallible>();
+        let _ = black_box(TokenStream::try_from(tokens).unwrap());
     }
 
     TokenStream::new()

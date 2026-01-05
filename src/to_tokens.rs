@@ -1,6 +1,6 @@
 use std::{convert::Infallible, error::Error, fmt};
 
-use proc_macro::{Group, Ident, Literal, Punct, Spacing, TokenStream};
+use proc_macro::{Group, Ident, Literal, Punct, TokenStream};
 
 use crate::TokenQueue;
 
@@ -195,6 +195,18 @@ impl<T: TryToTokens> TryToTokens for &mut T {
     }
 }
 
+impl TryIntoTokens for () {
+    type Error = Infallible;
+
+    fn try_extend_tokens(self, _: &mut TokenQueue) -> TtResult<()> {
+        Ok(())
+    }
+
+    fn queue_size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(0))
+    }
+}
+
 impl TryIntoTokens for Infallible {
     type Error = Infallible;
 
@@ -257,25 +269,6 @@ impl<T: TryIntoTokens> TryIntoTokens for Option<T> {
 
     fn queue_size_hint(&self) -> (usize, Option<usize>) {
         self.as_ref().map_or((0, None), T::queue_size_hint)
-    }
-}
-
-/// Evaluates to `@`. Useful for escaping.
-///
-/// See [`quote`](crate::quote!#escaping-) for use cases.
-#[derive(Debug, Clone, Copy)]
-pub struct YouKnowWhatIMean;
-
-impl TryIntoTokens for YouKnowWhatIMean {
-    type Error = Infallible;
-
-    fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<()> {
-        q.push(Punct::new('@', Spacing::Alone));
-        Ok(())
-    }
-
-    fn queue_size_hint(&self) -> (usize, Option<usize>) {
-        (1, Some(1))
     }
 }
 

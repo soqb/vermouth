@@ -117,9 +117,9 @@ impl Regime {
             [b'b', b'r', s @ ..] if ctfe::bytes_any(s, b'"') => Regime::ByteString,
             [b'c', b'"', ..] => Regime::CString,
             [b'c', b'r', s @ ..] if ctfe::bytes_any(s, b'"') => Regime::CString,
-            [b'"', ..] => Regime::ByteString,
-            [b'\'', ..] => Regime::ByteCharacter,
-            [b'r', s @ ..] if ctfe::bytes_any(s, b'"') => Regime::ByteString,
+            [b'"', ..] => Regime::String,
+            [b'\'', ..] => Regime::Character,
+            [b'r', s @ ..] if ctfe::bytes_any(s, b'"') => Regime::String,
             _ => Regime::Unknown,
         }
     }

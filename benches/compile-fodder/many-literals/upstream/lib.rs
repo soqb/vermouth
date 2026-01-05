@@ -14,7 +14,7 @@ const ITERS: usize = 2usize.pow(14);
 pub fn feel_the_burn(_ts: TokenStream) -> TokenStream {
     // 256 * 2^14 = 2^22 = 4194304 tokens per invocation
     for _ in 0..ITERS {
-        let _ = black_box(TokenStream::from(quote! {
+        let tokens = quote! {
             """""""" """""""" """""""" """"""""
             """""""" """""""" """""""" """"""""
             """""""" """""""" """""""" """"""""
@@ -34,7 +34,10 @@ pub fn feel_the_burn(_ts: TokenStream) -> TokenStream {
             """""""" """""""" """""""" """"""""
             """""""" """""""" """""""" """"""""
             """""""" """""""" """""""" """"""""
-        }));
+        };
+        #[cfg(feature = "vermouth")]
+        let tokens = tokens.ascribe::<std::convert::Infallible>();
+        let _ = black_box(TokenStream::try_from(tokens).unwrap());
     }
 
     TokenStream::new()
