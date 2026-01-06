@@ -1,6 +1,8 @@
+use std::convert::Infallible;
+
 use proc_macro::{Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
-use crate::{Diagnostic, Expected, Pattern, Result, ToSpan, TokenQueue};
+use crate::{Diagnostic, Expected, Pattern, Result, ToSpan, TokenQueue, TryIntoTokens, TtResult};
 
 struct Stream<T, I> {
     seen_buffer: Vec<T>,
@@ -455,8 +457,20 @@ impl Parser {
     /// This method has the same semantics as [`Diagnostic::emit`].
     ///
     /// [reported]: Parser::report
-    pub fn emit_diagnostics(&mut self) -> TokenQueue {
-        Diagnostic::emit_many(self.diag_buf.drain(..))
+    pub fn emit_diagnostics(&mut self) -> impl TryIntoTokens<Error = Infallible> {
+        struct Wrap<T>(T);
+        impl<T: Iterator<Item = Diagnostic>> TryIntoTokens for Wrap<T> {
+            type Error = Infallible;
+
+            fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<()> {
+                for d in self.0 {
+                    q.try_extend_from(d.emit())?;
+                }
+                Ok(())
+            }
+        }
+
+        Wrap(self.diag_buf.drain(..))
     }
 
     /// Collects all tokens until a condition is met.

@@ -6,10 +6,6 @@ use proc_macro::{
 
 use crate::{DiagnosticLevel, ToSpan, TokenQueue};
 
-pub struct EmitState {
-    tokens: TokenQueue,
-}
-
 fn emit_error(buf: &mut TokenQueue, span: Span, msg: String) {
     macro_rules! quote_path {
         ($buf:ident <-) => {};
@@ -43,30 +39,29 @@ fn emit_error(buf: &mut TokenQueue, span: Span, msg: String) {
 
 #[cfg(feature = "warnings")]
 fn emit_warning(buf: &mut TokenQueue, span: Span, mut msg: String) {
-    // we really need quote !!!
-    fn in_const_block(buf: &mut TokenQueue, f: impl FnOnce(&mut TokenQueue)) {
-        buf.push(Ident::new("const", Span::call_site()));
-        buf.push(Ident::new("_", Span::call_site()));
-        buf.push(Punct::new(':', Alone));
-        buf.push(Group::new(Delimiter::Parenthesis, TokenStream::new()));
-        buf.push(Punct::new('=', Alone));
+    fn in_const_block(q: &mut TokenQueue, f: impl FnOnce(&mut TokenQueue)) {
+        q.push(Ident::new("const", Span::call_site()));
+        q.push(Ident::new("_", Span::call_site()));
+        q.push(Punct::new(':', Alone));
+        q.push(Group::new(Delimiter::Parenthesis, TokenStream::new()));
+        q.push(Punct::new('=', Alone));
 
         let mut group = TokenQueue::new();
         f(&mut group);
-        buf.push(Group::new(Delimiter::Brace, group.into()));
-        buf.push(Punct::new(';', Alone));
+        q.push(Group::new(Delimiter::Brace, group.into()));
+        q.push(Punct::new(';', Alone));
     }
 
-    fn in_attr(buf: &mut TokenQueue, f: impl FnOnce(&mut TokenQueue)) {
-        buf.push(Punct::new('#', Alone));
+    fn in_attr(q: &mut TokenQueue, f: impl FnOnce(&mut TokenQueue)) {
+        q.push(Punct::new('#', Alone));
 
         let mut group = TokenQueue::new();
         f(&mut group);
-        buf.push(Group::new(Delimiter::Bracket, group.into()));
+        q.push(Group::new(Delimiter::Bracket, group.into()));
     }
 
-    in_const_block(buf, move |buf| {
-        in_attr(buf, move |buf| {
+    in_const_block(buf, move |q| {
+        in_attr(q, move |buf| {
             buf.push(Ident::new("must_use", span));
             buf.push(Punct::new('=', Alone));
 
@@ -78,31 +73,25 @@ fn emit_warning(buf: &mut TokenQueue, span: Span, mut msg: String) {
             buf.push(lit);
         });
 
-        buf.push(Ident::new("struct", span));
-        buf.push(Ident::new("Warning", span));
-        buf.push(Punct::new(';', Alone));
+        q.push(Ident::new("struct", span));
+        q.push(Ident::new("Warning", span));
+        q.push(Punct::new(';', Alone));
 
-        buf.push(Ident::new("Warning", span));
-        buf.push(Punct::new(';', Alone));
+        q.push(Ident::new("Warning", span));
+        q.push(Punct::new(';', Alone));
     })
 }
 
-impl super::Emitter for EmitState {
-    fn new() -> Self {
-        EmitState {
-            tokens: TokenQueue::new(),
-        }
-    }
-    fn emit(&mut self, level: DiagnosticLevel, span: impl ToSpan, msg: &impl ToString) {
-        let (span, msg) = (span.span(), msg.to_string());
-        match level {
-            DiagnosticLevel::Error => emit_error(&mut self.tokens, span, msg),
-            #[cfg(feature = "warnings")]
-            DiagnosticLevel::Warning => emit_warning(&mut self.tokens, span, msg),
-        }
-    }
-
-    fn finish(self) -> TokenQueue {
-        self.tokens
+pub(super) fn emit(
+    q: &mut TokenQueue,
+    level: DiagnosticLevel,
+    span: impl ToSpan,
+    msg: &impl ToString,
+) {
+    let (span, msg) = (span.span(), msg.to_string());
+    match level {
+        DiagnosticLevel::Error => emit_error(q, span, msg),
+        #[cfg(feature = "warnings")]
+        DiagnosticLevel::Warning => emit_warning(q, span, msg),
     }
 }

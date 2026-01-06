@@ -272,6 +272,11 @@ impl<T: TryIntoTokens> TryIntoTokens for Option<T> {
     }
 }
 
+fn fold_size_hint(s: impl Iterator<Item = (usize, Option<usize>)>) -> (usize, Option<usize>) {
+    s.reduce(|(a, b), (c, d)| (a + c, b.and_then(|b| d.map(|d| b + d))))
+        .unwrap_or_else(|| (0, Some(0)))
+}
+
 macro_rules! impl_to_tokens_tt {
     ($($t:ty),*) => {
         $(

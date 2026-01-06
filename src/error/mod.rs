@@ -1,18 +1,12 @@
 use core::fmt;
-use std::{borrow::Cow, mem::replace};
+use std::{borrow::Cow, convert::Infallible, mem::replace};
 
 use proc_macro::Span;
 
-use crate::{Parser, ParserPos, ToSpan, TokenQueue};
+use crate::{Parser, ParserPos, ToSpan, TokenQueue, TryIntoTokens, TryToTokens, TtResult};
 
 #[cfg_attr(feature = "unstable-diagnostics-backend", path = "emit_unstable.rs")]
 mod emit;
-
-trait Emitter {
-    fn new() -> Self;
-    fn emit(&mut self, level: DiagnosticLevel, span: impl ToSpan, msg: &impl ToString);
-    fn finish(self) -> TokenQueue;
-}
 
 /// An alias for the standard library [`Result`](core::result::Result).
 ///
@@ -106,7 +100,6 @@ impl Expected {
     /// ```
     /// # vermouth::ඞ_declare_test!();
     /// # use vermouth::Expected;
-    /// #
     /// # let parser_pos = vermouth::ParserPos::arbitrary();
     /// let error = Expected::nothing(parser_pos);
     /// assert_eq!(error.to_string(), "expected no tokens");
@@ -128,7 +121,6 @@ impl Expected {
     /// ```
     /// # vermouth::ඞ_declare_test!();
     /// # use vermouth::Expected;
-    /// #
     /// # let parser_pos = vermouth::ParserPos::arbitrary();
     /// let error = Expected::lit(parser_pos, "foo");
     /// assert_eq!(error.to_string(), "expected `foo`");
@@ -146,7 +138,6 @@ impl Expected {
     /// ```
     /// # vermouth::ඞ_declare_test!();
     /// # use vermouth::Expected;
-    /// #
     /// # let parser_pos = vermouth::ParserPos::arbitrary();
     /// let error = Expected::noun(parser_pos, "a bar");
     /// assert_eq!(error.to_string(), "expected a bar");
@@ -163,7 +154,6 @@ impl Expected {
     /// ```
     /// # vermouth::ඞ_declare_test!();
     /// # use vermouth::Expected;
-    /// #
     /// # let parser_pos = vermouth::ParserPos::arbitrary();
     /// let mut error = Expected::lit(parser_pos, "foo");
     /// error.push_lit("bar");
@@ -182,7 +172,6 @@ impl Expected {
     /// ```
     /// # vermouth::ඞ_declare_test!();
     /// # use vermouth::Expected;
-    /// #
     /// # let parser_pos = vermouth::ParserPos::arbitrary();
     /// let mut error = Expected::noun(parser_pos, "some foo");
     /// error.push_noun("any kind of bar");
@@ -201,7 +190,6 @@ impl Expected {
     /// ```
     /// # vermouth::ඞ_declare_test!();
     /// # use vermouth::Expected;
-    /// #
     /// # let parser_pos = vermouth::ParserPos::arbitrary();
     /// let error = Expected::nothing(parser_pos).or_lit("foo").or_noun("any bar");
     /// assert_eq!(error.to_string(), "expected `foo`, or any bar");
@@ -220,7 +208,6 @@ impl Expected {
     /// ```
     /// # vermouth::ඞ_declare_test!();
     /// # use vermouth::Expected;
-    /// #
     /// # let parser_pos = vermouth::ParserPos::arbitrary();
     /// let error = Expected::nothing(parser_pos).or_noun("some foo").or_lit("bar");
     /// assert_eq!(error.to_string(), "expected some foo, or `bar`");
@@ -486,45 +473,29 @@ impl Diagnostic {
         }
     }
 
-    /// Emits this diagnostic.
-    ///
-    /// Depending on the feature configuration and execution context,
-    /// some errors may be reported immediately
-    /// and some may be contained in the retuned [`TokenQueue`].
-    #[must_use = "reported diagnostics should be returned from proc macros"]
-    #[inline]
-    pub fn emit(self) -> TokenQueue {
-        Self::emit_many(Some(self))
-    }
-
-    /// Emits a sequence of diagnostics.
-    ///
-    /// See [`Diagnostic::emit`] for a detailed description.
-    #[must_use = "reported diagnostics should be returned from proc macros"]
-    #[inline]
-    pub fn emit_many(ds: impl IntoIterator<Item = Self>) -> TokenQueue {
-        let mut emitter = emit::EmitState::new();
-        for d in ds {
-            d.kind.emit(&mut emitter);
-        }
-        emitter.finish()
+    #[must_use = "accumulated errors must be returned from the proc-macro."]
+    pub fn emit(self) -> impl TryIntoTokens<Error = Infallible> {
+        self.kind
     }
 }
+impl TryIntoTokens for DiagnosticKind {
+    type Error = Infallible;
 
-impl DiagnosticKind {
-    fn emit(self, emitter: &mut impl Emitter) {
+    fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<()> {
         match self {
             DiagnosticKind::Expected(exp) => {
-                emitter.emit(DiagnosticLevel::Error, exp.pos.span(), &exp.to_string())
+                emit::emit(q, DiagnosticLevel::Error, exp.pos.span(), &exp.to_string())
             }
             DiagnosticKind::Custom(custom) => {
-                emitter.emit(custom.level, custom.span, &custom.msg.to_string())
+                emit::emit(q, custom.level, custom.span, &custom.msg.to_string())
             }
             DiagnosticKind::Join(errors) => {
                 for err in errors {
-                    err.emit(emitter);
+                    err.try_extend_tokens(q)?;
                 }
             }
         }
+
+        Ok(())
     }
 }
