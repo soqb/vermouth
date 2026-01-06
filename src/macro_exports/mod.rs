@@ -2,8 +2,8 @@
 
 use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream};
 
-use crate::{ReparseError, TokenQueue, TryIntoTokens, TtError, TtResult, ctfe};
-use std::{convert::Infallible, str::FromStr};
+use crate::{PushToken, TokenQueue, ctfe};
+use std::{fmt, str::FromStr};
 
 pub use core;
 pub use proc_macro;
@@ -15,29 +15,15 @@ pub use spec::*;
 
 pub fn assert_tokens_extend(_: &mut TokenStream) {}
 
-#[inline]
-pub fn err<T, A, B: From<A>>(e: TtError<A>) -> TtResult<T, B> {
-    Err(match e {
-        TtError::Reparse(rp) => TtError::Reparse(rp),
-        TtError::Misc(m) => TtError::Misc(m.into()),
-    })
-}
+// #[inline]
+// pub fn err<T, A, B: From<A>>(e: TtError<A>) -> TtResult<T, B> {
+//     Err(e.into())
+// }
 
-#[inline]
-pub fn ok<T, E>(x: T) -> TtResult<T, E> {
-    Ok(x)
-}
-
-#[inline]
-pub fn try_extend_tokens<T: TryIntoTokens>(buf: &mut TokenQueue, t: T) -> TtResult<(), T::Error> {
-    t.try_extend_tokens(buf)?;
-    Ok(())
-}
-
-#[inline]
-pub fn try_to_tokens<T: TryIntoTokens>(t: T) -> TtResult<TokenQueue, T::Error> {
-    t.try_into_tokens()
-}
+// #[inline]
+// pub fn ok<T, E>(x: T) -> TtResult<T, E> {
+//     Ok(x)
+// }
 
 pub fn push_underscore(q: &mut TokenQueue) {
     q.push(Ident::new("_", Span::call_site()));
@@ -48,39 +34,70 @@ pub fn push_empty_group(q: &mut TokenQueue, delim: Delimiter) {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Verbatim(pub &'static str);
+pub enum ReparseKind {
+    Ident,
+    Literal,
+    Lifetime,
+}
 
-impl TryIntoTokens for Verbatim {
-    type Error = Infallible;
-
-    fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<()> {
-        let tt = TokenStream::from_str(self.0)
-            .map_err(move |lex| ReparseError::from_ident(lex, self.0))?;
-        q.push(tt);
-        Ok(())
+impl fmt::Display for ReparseKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            ReparseKind::Ident => "ident",
+            ReparseKind::Literal => "literal",
+            ReparseKind::Lifetime => "lifetime",
+        };
+        f.write_str(s)
     }
 }
 
-pub const fn parse_lifetime(str: &'static str) -> impl TryIntoTokens<Error = Infallible> + Copy {
-    #[derive(Clone, Copy)]
-    struct Lifetime<T>(T);
+#[derive(Debug, Clone, Copy)]
+pub struct SourceLocation {
+    pub file: &'static str,
+    pub line: u32,
+    pub column: u32,
+}
 
-    impl<T: TryIntoTokens> TryIntoTokens for Lifetime<T> {
-        type Error = T::Error;
+impl fmt::Display for SourceLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let SourceLocation { file, line, column } = self;
+        write!(f, "in {file} at {line}:{column}")
+    }
+}
 
-        fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<(), T::Error> {
-            q.push(Punct::new('\'', Spacing::Joint));
-            self.0.try_extend_tokens(q)
+#[macro_export]
+macro_rules! ඞ_macro_capture_source_location {
+    () => {
+        $crate::ඞ_macro_exports::SourceLocation {
+            file: $crate::ඞ_macro_exports::core::file!(),
+            line: $crate::ඞ_macro_exports::core::line!(),
+            column: $crate::ඞ_macro_exports::core::column!(),
         }
-    }
-
-    // NB: no assert_eq bc const.
-    let (a, b) = str.split_at(1);
-    assert!(matches!(a.as_bytes(), b"\'"));
-    Lifetime(parse_ident(b))
+    };
 }
 
-#[inline(never)]
+#[derive(Debug, Clone, Copy)]
+pub struct Verbatim {
+    pub text: &'static str,
+    pub kind: ReparseKind,
+    pub location: SourceLocation,
+}
+
+impl PushToken for Verbatim {
+    fn push_to(self, q: &mut TokenQueue) {
+        let Verbatim {
+            text,
+            kind,
+            location,
+        } = self;
+        let tt = TokenStream::from_str(text).unwrap_or_else(move |lex| {
+            panic!("failed to reparse {kind} {text:?} {location}: {lex}")
+        });
+        q.push(tt);
+    }
+}
+
+#[inline]
 pub fn push_punct(q: &mut TokenQueue, chars: &[char]) {
     let Some((&last, rest)) = chars.split_last() else {
         return;
@@ -93,25 +110,47 @@ pub fn push_punct(q: &mut TokenQueue, chars: &[char]) {
     q.push(Punct::new(last, Spacing::Alone));
 }
 
-pub const fn parse_ident(s: &'static str) -> impl TryIntoTokens<Error = Infallible> + Copy {
+pub const fn parse_ident(s: &'static str, location: SourceLocation) -> impl PushToken {
+    parse_ident_like(ReparseKind::Ident, s, location)
+}
+
+pub const fn parse_lifetime(s: &'static str, location: SourceLocation) -> impl PushToken {
+    #[derive(Clone, Copy)]
+    struct Lifetime<T>(T);
+
+    impl<T: PushToken> PushToken for Lifetime<T> {
+        fn push_to(self, q: &mut TokenQueue) {
+            q.push(Punct::new('\'', Spacing::Joint));
+            self.0.push_to(q)
+        }
+    }
+
+    // NB: no assert_eq bc const.
+    let (f, s) = s.split_at(1);
+    assert!(matches!(f.as_bytes(), b"\'"));
+    Lifetime(parse_ident_like(ReparseKind::Lifetime, s, location))
+}
+
+const fn parse_ident_like(
+    kind: ReparseKind,
+    s: &'static str,
+    location: SourceLocation,
+) -> impl PushToken {
     #[derive(Clone, Copy)]
     enum IdentParse {
         Raw(&'static str),
         Notraw(&'static str),
-        Fallback(&'static str),
+        Fallback(Verbatim),
     }
 
-    impl TryIntoTokens for IdentParse {
-        type Error = Infallible;
-
-        #[inline(always)]
-        fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<()> {
+    impl PushToken for IdentParse {
+        #[inline]
+        fn push_to(self, q: &mut TokenQueue) {
             match self {
                 IdentParse::Raw(s) => q.push(Ident::new_raw(s, Span::call_site())),
                 IdentParse::Notraw(s) => q.push(Ident::new(s, Span::call_site())),
-                IdentParse::Fallback(s) => q.try_extend_from(Verbatim(s))?,
+                IdentParse::Fallback(v) => q.push(v),
             }
-            Ok(())
         }
     }
 
@@ -121,7 +160,11 @@ pub const fn parse_ident(s: &'static str) -> impl TryIntoTokens<Error = Infallib
         {
             IdentParse::Raw(raw)
         } else {
-            IdentParse::Fallback(s)
+            IdentParse::Fallback(Verbatim {
+                text: s,
+                kind,
+                location,
+            })
         }
     } else {
         IdentParse::Notraw(s)

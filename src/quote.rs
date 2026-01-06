@@ -1,10 +1,8 @@
 //! See [`quote`](crate::quote!).
 
-use std::{convert::Infallible, error::Error};
-
 use proc_macro::{Punct, Spacing, TokenStream};
 
-use crate::{TokenQueue, TryIntoTokens, TryToTokens, TtError, TtResult, for_all_punct_seqs};
+use crate::{IntoTokens, ToTokens, TokenQueue, for_all_punct_seqs};
 
 /// Lazy quasi-quoting for Rust source.
 ///
@@ -47,43 +45,15 @@ use crate::{TokenQueue, TryIntoTokens, TryToTokens, TtError, TtResult, for_all_p
 /// }
 /// # .ascribe::<std::convert::Infallible>();
 /// ```
-///
-/// # Errors
-///
-/// Formally, `quote` always evaluates to a [`TtResult<TokenStream, E>`](crate::TtResult) for some [error type] `E`.
-///
-/// [error type]: crate::TryToTokens::Error
-///
-/// Due to a plurality of error types and the implementation of [`TryToTokens`](crate::TryToTokens),
-/// `try_quote` cannot always infer an appropriate value of `E`.
-///
-/// ```compile_fail
-/// # vermouth::ඞ_declare_test!();
-/// # use vermouth::quote;
-/// // ERROR: type annotations needed.
-/// let _ = quote! { ... };
-/// ```
-///
-/// If the default behavior is wrong, try using [`Transcriber::ascribe`] to specify the error type exactly.
-/// Usually, [`Infallible`](std::convert::Infallible) is sufficient
-/// since [`TtError`](crate::TtError) already encapsulates the errors that arise from e.g. quoting literals.
-///
-/// ```
-/// # vermouth::ඞ_declare_test!();
-/// # use vermouth::quote;
-/// use std::convert::Infallible;
-/// let _ = quote! { ... }.ascribe::<Infallible>();
-/// ```
 #[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
 #[macro_export]
 macro_rules! quote {
     ($($t:tt)*) => {
         $crate::Transcriber::from_fn(
-            |_q| '_esc: {
+            |_q| {
                 #[allow(unused_imports)]
-                use $crate::{TtResult, TryIntoTokens as _, ඞ_macro_exports::{self as m, proc_macro, core, Spec, SpecLiteralQuote as _}};
-                $crate::ඞ_macro_extend_quote_impl! { _q '_esc $($t)* };
-                TtResult::Ok(())
+                use $crate::{IntoTokens as _, ඞ_macro_exports::{self as m, proc_macro, core, Spec, SpecLiteralQuote as _}};
+                $crate::ඞ_macro_extend_quote_impl! { _q $($t)* };
             },
         )
     };
@@ -94,81 +64,48 @@ macro_rules! quote {
 /// See [the `quote` macro](crate::quote!) for more.
 #[derive(Clone, Copy)]
 pub struct Transcriber<F>(F);
-impl<E, F> Transcriber<F>
+impl<F> Transcriber<F>
 where
-    E: Error + From<Infallible>,
-    F: FnOnce(&mut TokenQueue) -> TtResult<(), E>,
+    F: FnOnce(&mut TokenQueue),
 {
     pub fn from_fn(f: F) -> Transcriber<F> {
         Transcriber(f)
     }
-
-    /// Annotates this transcriber with an [error type](crate::quote!#errors).
-    ///
-    /// This is usually unnecessary but see [`quote`](crate::quote!#errors) for an example.
-    pub fn ascribe<EE>(self) -> Transcriber<F>
-    where
-        // holy shit this actually works lol
-        EE: seal::Reflex<This = E>,
-    {
-        self
-    }
 }
 
-mod seal {
-    pub trait Reflex {
-        type This: ?Sized;
-    }
-    impl<T: ?Sized> Reflex for T {
-        type This = T;
-    }
-}
-
-impl<E, F> TryIntoTokens for Transcriber<F>
+impl<F> IntoTokens for Transcriber<F>
 where
-    E: Error + From<Infallible>,
-    F: FnOnce(&mut TokenQueue) -> TtResult<(), E>,
+    F: FnOnce(&mut TokenQueue),
 {
-    type Error = E;
-
-    fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<(), E> {
+    fn extend_tokens(self, q: &mut TokenQueue) {
         (self.0)(q)
     }
 }
 
-impl<E, F> TryToTokens for Transcriber<F>
+impl<F> ToTokens for Transcriber<F>
 where
-    E: Error + From<Infallible>,
-    F: Fn(&mut TokenQueue) -> TtResult<(), E>,
+    F: Fn(&mut TokenQueue),
 {
-    type Error = E;
-
-    fn try_extend_tokens_ref(&self, q: &mut TokenQueue) -> TtResult<(), E> {
+    fn extend_tokens_ref(&self, q: &mut TokenQueue) {
         (self.0)(q)
     }
 }
 
-impl<E, F> TryFrom<Transcriber<F>> for TokenStream
+impl<F> From<Transcriber<F>> for TokenStream
 where
-    E: Error + From<Infallible>,
-    F: FnOnce(&mut TokenQueue) -> TtResult<(), E>,
+    F: FnOnce(&mut TokenQueue),
 {
-    type Error = TtError<E>;
-
-    fn try_from(value: Transcriber<F>) -> TtResult<TokenStream, E> {
-        value.try_into_tokens().map(TokenStream::from)
+    fn from(value: Transcriber<F>) -> TokenStream {
+        TokenStream::from(value.into_tokens())
     }
 }
 
-impl<E, F> TryFrom<&Transcriber<F>> for TokenStream
+impl<F> From<&Transcriber<F>> for TokenStream
 where
-    E: Error + From<Infallible>,
-    F: Fn(&mut TokenQueue) -> TtResult<(), E>,
+    F: Fn(&mut TokenQueue),
 {
-    type Error = TtError<E>;
-
-    fn try_from(value: &Transcriber<F>) -> TtResult<TokenStream, E> {
-        value.try_to_tokens().map(TokenStream::from)
+    fn from(value: &Transcriber<F>) -> TokenStream {
+        TokenStream::from(value.to_tokens())
     }
 }
 
@@ -178,12 +115,9 @@ where
 #[derive(Debug, Clone, Copy)]
 pub struct Dr;
 
-impl TryIntoTokens for Dr {
-    type Error = Infallible;
-
-    fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<()> {
+impl IntoTokens for Dr {
+    fn extend_tokens(self, q: &mut TokenQueue) {
         q.push(Punct::new('$', Spacing::Alone));
-        Ok(())
     }
 
     fn queue_size_hint(&self) -> (usize, Option<usize>) {
@@ -195,42 +129,54 @@ impl TryIntoTokens for Dr {
 #[macro_export]
 macro_rules! verbatim {
     ($lt:lifetime) => {
-        $crate::ඞ_macro_exports::Verbatim($crate::ඞ_macro_exports::core::stringify!($lt))
+        $crate::ඞ_macro_exports::Verbatim {
+            text: $crate::ඞ_macro_exports::core::stringify!($lt),
+            kind: $crate::ඞ_macro_exports::ReparseKind::Lifetime,
+            location: $crate::ඞ_macro_capture_source_location!(),
+        }
     };
     ($id:ident) => {
-        $crate::ඞ_macro_exports::Verbatim($crate::ඞ_macro_exports::core::stringify!($id))
+        $crate::ඞ_macro_exports::Verbatim {
+            text: $crate::ඞ_macro_exports::core::stringify!($id),
+            kind: $crate::ඞ_macro_exports::ReparseKind::Ident,
+            location: $crate::ඞ_macro_capture_source_location!(),
+        }
     };
     ($lit:literal) => {
-        $crate::ඞ_macro_exports::Verbatim($crate::ඞ_macro_exports::core::stringify!($lit))
+        $crate::ඞ_macro_exports::Verbatim {
+            text: $crate::ඞ_macro_exports::core::stringify!($lit),
+            kind: $crate::ඞ_macro_exports::ReparseKind::Literal,
+            location: $crate::ඞ_macro_capture_source_location!(),
+        }
     };
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! ඞ_macro_inline_quote_impl {
-    ($q:ident $s:lifetime $($t:tt)*) => {
+    ($q:ident $($t:tt)*) => {
         let mut $q = $crate::TokenQueue::new();
         let _q = &mut $q;
-        $crate::ඞ_macro_extend_quote_impl! { _q $s $($t)* };
+        $crate::ඞ_macro_extend_quote_impl! { _q $($t)* };
     };
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! ඞ_macro_extend_quote_impl {
-    ($q:ident $s:lifetime) => {};
-    ($q:ident $s:lifetime $) => {
+    ($q:ident) => {};
+    ($q:ident $) => {
         core::compile_error!("invalid quasi-quoting syntax: `$` cannot trail the input.");
     };
-    ($q:ident $s:lifetime $t:tt) => {
-        $crate::ඞ_macro_quote_tt_impl! { $q $s {$t} };
+    ($q:ident $t:tt) => {
+        $crate::ඞ_macro_quote_tt_impl! { $q {$t} };
     };
-    ($q:ident $s:lifetime $($t:tt)*) => {
+    ($q:ident $($t:tt)*) => {
         // #[cfg(not(debug_assertions))]
         // $crate::TokenQueue::reserve($q, $crate::ඞ_macro_quote_reserve_size! { $($t)* });
         $crate::ඞ_macro_quote_matrixed! {
             ඞ_macro_quote_emit
-            { $q $s }
+            $q
             { _ _ _ _ _ $({$t})* }
             { _ _ _ _ $({$t})* _ }
             { _ _ _ $({$t})* _ _ }
@@ -244,18 +190,16 @@ macro_rules! ඞ_macro_extend_quote_impl {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! ඞ_macro_quote_emit {
-    (tt {$q:ident $s:lifetime} $t:tt) => {
-        $crate::ඞ_macro_quote_tt_impl! { $q $s $t };
+    (tt $q:ident $t:tt) => {
+        $crate::ඞ_macro_quote_tt_impl! { $q $t };
     };
-    (embed {$q:ident $s:lifetime} $n:ident) => {
-        if let TtResult::Err(e) = $n.try_extend_tokens($q) {
-            break $s m::err(e);
-        }
+    (embed $q:ident $n:ident) => {
+        $n.extend_tokens($q);
     };
     (rep $cx:tt $n:ident $($t:tt)*) => {
         core::compile_error!("i'm working on it trust bro");
     };
-    (seprep $cx:tt $n:ident $sep:tt $($t:tt)*) => {
+    (seprep $cx:tt $n:ident p:tt $($t:tt)*) => {
         core::compile_error!("i'm working on it trust bro");
     };
     (reserved $cx:tt $t:tt) => {
@@ -329,7 +273,7 @@ macro_rules! ඞ_macro_quote_reserve_size_emit {
         $v = $v.wrapping_add($n.queue_size_hint().0);
     };
     (rep $v:ident $n:ident $($t:tt)*) => {};
-    (seprep $v:ident $n:ident $sep:tt $($t:tt)*) => {};
+    (seprep $v:ident $n:ident p:tt $($t:tt)*) => {};
     (reserved $v:ident $t:tt) => {};
     (triple_at $v:ident) => {};
 }
@@ -349,10 +293,10 @@ macro_rules! ඞ_macro_quote_parse_windowed {
     };
     ($m:ident $cx:tt $_0:tt {$} {$n:ident} {($($t:tt)*)} {*} $a:tt) => {
         $crate::$m! { rep $cx $n $($t)* }
-        $crate::ඞ_macro_quote_parse_windowed! { $q $s _ _ _ _ _ $a }
+        $crate::ඞ_macro_quote_parse_windowed! { $q _ _ _ _ _ $a }
     };
-    ($m:ident $cx:tt $_0:tt {$} {$n:ident} {($($t:tt)*)} {$sep:tt} {*}) => {
-        $crate::$m! { seprep $cx $n $sep $($t)* }
+    ($m:ident $cx:tt $_0:tt {$} {$n:ident} {($($t:tt)*)} {p:tt} {*}) => {
+        $crate::$m! { seprep $cx $n p $($t)* }
     };
     ($m:ident $cx:tt $_0:tt {$} {$n:ident} $a:tt $b:tt $c:tt) => {
         $crate::$m! { embed $cx $n };
@@ -421,7 +365,7 @@ macro_rules! def_quote_tt {
         macro_rules! ඞ_macro_quote_tt_impl_ {
             $($arm)*
             $(
-                ($q:ident $s:lifetime {$p}) => {
+                ($q:ident {$p}) => {
                     m::push_punct(
                         $q,
                         $crate::punct_decompose!(
@@ -449,52 +393,51 @@ macro_rules! def_quote_tt {
 for_all_punct_seqs!(
     def_quote_tt,
     arms = {
-        ($q:ident $s:lifetime _) => {};
-        ($q:ident $s:lifetime {_}) => {
+        ($q:ident _) => {};
+        ($q:ident {_}) => {
             m::push_underscore($q);
         };
-        ($q:ident $s:lifetime ()) => {
+        ($q:ident ()) => {
             m::push_empty_group(proc_macro::Delimiter::Parenthesis);
         };
-        ($q:ident $s:lifetime {}) => {
+        ($q:ident {}) => {
             m::push_empty_group(proc_macro::Delimiter::Brace);
         };
-        ($q:ident $s:lifetime []) => {
+        ($q:ident []) => {
             m::push_empty_group(proc_macro::Delimiter::Bracket);
         };
-        ($q:ident $s:lifetime {($($t:tt)*)}) => {
+        ($q:ident {($($t:tt)*)}) => {
             $crate::TokenQueue::open_group($q, proc_macro::Delimiter::Parenthesis);
-            $crate::ඞ_macro_extend_quote_impl! { $q $s $($t)* };
+            $crate::ඞ_macro_extend_quote_impl! { $q $($t)* };
             $crate::TokenQueue::close_and_enqueue_group($q);
         };
-        ($q:ident $s:lifetime {{$($t:tt)*}}) => {
+        ($q:ident {{$($t:tt)*}}) => {
             $crate::TokenQueue::open_group($q, proc_macro::Delimiter::Brace);
-            $crate::ඞ_macro_extend_quote_impl! { $q $s $($t)* };
+            $crate::ඞ_macro_extend_quote_impl! { $q $($t)* };
             $crate::TokenQueue::close_and_enqueue_group($q);
         };
-        ($q:ident $s:lifetime {[$($t:tt)*]}) => {
+        ($q:ident {[$($t:tt)*]}) => {
             $crate::TokenQueue::open_group($q, proc_macro::Delimiter::Bracket);
-            $crate::ඞ_macro_extend_quote_impl! { $q $s $($t)* };
+            $crate::ඞ_macro_extend_quote_impl! { $q $($t)* };
             $crate::TokenQueue::close_and_enqueue_group($q);
         };
-        ($q:ident $s:lifetime {$id:ident}) => {
-            if let TtResult::Err(e) = const { m::parse_ident(stringify!($id)) }.try_extend_tokens($q) {
-                break $s m::err(e);
-            }
+        ($q:ident {$id:ident}) => {
+            $crate::TokenQueue::push($q, const {
+                m::parse_ident(stringify!($id), $crate::ඞ_macro_capture_source_location!())
+            });
         };
-        ($q:ident $s:lifetime {$lit:literal}) => {
-            if let TtResult::Err(e) = m::Spec::new(&$lit).ඞ_lit_quote::<{ m::parse_lit_regime(core::stringify!($lit)) }>(
+        ($q:ident {$lit:literal}) => {
+            m::Spec::new(&$lit).ඞ_lit_quote::<{ m::parse_lit_regime(core::stringify!($lit)) }>(
                 &$lit,
                 core::stringify!($lit),
+                $crate::ඞ_macro_capture_source_location!(),
                 $q
-            ) {
-                break $s m::err(e);
-            }
+            );
         };
-        ($q:ident $s:lifetime {$lt:lifetime}) => {
-            if let TtResult::Err(e) = const { m::parse_lifetime(stringify!($lt)) }.try_extend_tokens($q) {
-                break $s m::err(e);
-            }
+        ($q:ident {$lt:lifetime}) => {
+            $crate::TokenQueue::push($q, const {
+                m::parse_lifetime(stringify!($lt), $crate::ඞ_macro_capture_source_location!())
+            });
         };
     }
 );

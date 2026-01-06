@@ -3,8 +3,8 @@ use macrobench::*;
 
 fn main() {
     macrobench::main("vermouth", |cx| {
-        much_nesting(cx);
         many_literals(cx);
+        much_nesting(cx);
         many_tokens(cx);
     })
 }
@@ -117,6 +117,8 @@ fn many_literals(cx: &Bencher) {
             lvl,
         )
     };
+
+    bench_job(&target, "control", 0, "3");
 
     let run_for_all_opts = |target: &Target, name: &str| {
         for (i, lvl) in OLVL.iter().enumerate() {

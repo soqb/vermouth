@@ -2,9 +2,15 @@
 
 use std::marker::PhantomData;
 
-use crate::{TokenQueue, TryIntoTokens, TtResult};
+use crate::{
+    IntoTokens, TokenQueue,
+    ඞ_macro_exports::{SourceLocation, Verbatim},
+};
 
-use super::lit::{self, DelayedLiteral, LitContents};
+use super::{
+    ReparseKind,
+    lit::{DelayedLiteral, LitContents},
+};
 
 pub struct Spec<T>(PhantomData<T>);
 
@@ -26,8 +32,9 @@ pub trait SpecLiteralQuote: Sized {
         self,
         datum: &Self::Datum,
         text: &'static str,
-        buf: &mut TokenQueue,
-    ) -> TtResult<()>;
+        location: SourceLocation,
+        q: &mut TokenQueue,
+    );
 }
 
 impl<T: LitContents> SpecLiteralQuote for Spec<T> {
@@ -38,11 +45,16 @@ impl<T: LitContents> SpecLiteralQuote for Spec<T> {
         self,
         &datum: &T,
         text: &'static str,
-        buf: &mut TokenQueue,
-    ) -> TtResult<()> {
+        location: SourceLocation,
+        q: &mut TokenQueue,
+    ) {
         match DelayedLiteral::<T, REGIME>::new(datum) {
-            Some(l) => l.try_extend_tokens(buf),
-            None => lit::fallback(text, buf),
+            Some(l) => l.extend_tokens(q),
+            None => q.push(Verbatim {
+                kind: ReparseKind::Literal,
+                text,
+                location,
+            }),
         }
     }
 }
@@ -56,8 +68,13 @@ impl<T> SpecLiteralQuote for &Spec<T> {
         self,
         _: &T,
         text: &'static str,
-        buf: &mut TokenQueue,
-    ) -> TtResult<()> {
-        lit::fallback(text, buf)
+        location: SourceLocation,
+        q: &mut TokenQueue,
+    ) {
+        q.push(Verbatim {
+            kind: ReparseKind::Literal,
+            text,
+            location,
+        })
     }
 }

@@ -35,9 +35,22 @@ pub fn feel_the_burn(_ts: TokenStream) -> TokenStream {
             """""""" """""""" """""""" """"""""
             """""""" """""""" """""""" """"""""
         };
-        #[cfg(feature = "vermouth")]
-        let tokens = tokens.ascribe::<std::convert::Infallible>();
-        let _ = black_box(TokenStream::try_from(tokens).unwrap());
+        let _ = black_box(TokenStream::from(tokens));
+    }
+
+    TokenStream::new()
+}
+
+#[cfg(not(any(feature = "vermouth", feature = "dtolnay")))]
+#[proc_macro]
+pub fn feel_the_burn(_ts: TokenStream) -> TokenStream {
+    // this is our best-effort attempt at isolating the API cost of these approaches.
+    // compared to the above, especially on -O3, this iterator is basically free.
+    let l = proc_macro::Literal::string("");
+    let it = (0..LEN).map(move |_| proc_macro::TokenTree::from(l.clone()));
+
+    for _ in 0..ITERS {
+        let _ = black_box(TokenStream::from_iter(it.clone()));
     }
 
     TokenStream::new()

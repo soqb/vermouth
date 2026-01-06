@@ -1,8 +1,6 @@
-use std::convert::Infallible;
-
 use proc_macro::{Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
-use crate::{Diagnostic, Expected, Pattern, Result, ToSpan, TokenQueue, TryIntoTokens, TtResult};
+use crate::{Diagnostic, Expected, IntoTokens, Pattern, Result, ToSpan, TokenQueue};
 
 struct Stream<T, I> {
     seen_buffer: Vec<T>,
@@ -457,16 +455,13 @@ impl Parser {
     /// This method has the same semantics as [`Diagnostic::emit`].
     ///
     /// [reported]: Parser::report
-    pub fn emit_diagnostics(&mut self) -> impl TryIntoTokens<Error = Infallible> {
+    pub fn emit_diagnostics(&mut self) -> impl IntoTokens {
         struct Wrap<T>(T);
-        impl<T: Iterator<Item = Diagnostic>> TryIntoTokens for Wrap<T> {
-            type Error = Infallible;
-
-            fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<()> {
+        impl<T: Iterator<Item = Diagnostic>> IntoTokens for Wrap<T> {
+            fn extend_tokens(self, q: &mut TokenQueue) {
                 for d in self.0 {
-                    q.try_extend_from(d.emit())?;
+                    q.extend_from(d.emit());
                 }
-                Ok(())
             }
         }
 

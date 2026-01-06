@@ -1,12 +1,12 @@
 //! Provides utilities for parsing attributes.
 
-use std::{convert::Infallible, error::Error, marker::PhantomData};
+use std::marker::PhantomData;
 
 use proc_macro::{Delimiter, Punct, Span, TokenStream, TokenTree};
 
 use crate::{
-    Diagnostic, DiagnosticLevel, Eos, Expected, Parse, Parser, Result, ToSpan, TokenQueue,
-    TokenTreeExt, TryIntoTokens, TryToTokens, TtResult, quote,
+    Diagnostic, DiagnosticLevel, Eos, Expected, IntoTokens, Parse, Parser, Result, ToSpan,
+    ToTokens, TokenQueue, TokenTreeExt, quote,
 };
 
 /// An attribute which may be [`cfg`].
@@ -37,13 +37,11 @@ impl<T: Parse> Parse for CfgLeaf<T> {
     }
 }
 
-impl<T: TryIntoTokens> TryIntoTokens for CfgLeaf<T> {
-    type Error = T::Error;
-
-    fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<(), T::Error> {
+impl<T: IntoTokens> IntoTokens for CfgLeaf<T> {
+    fn extend_tokens(self, q: &mut TokenQueue) {
         match self {
-            CfgLeaf::Cfg { meta } => q.try_extend_from(quote! { cfg($meta) }),
-            CfgLeaf::Other(c) => c.try_extend_tokens(q),
+            CfgLeaf::Cfg { meta } => q.extend_from(quote! { cfg($meta) }),
+            CfgLeaf::Other(c) => q.extend_from(c),
         }
     }
 }
@@ -92,36 +90,30 @@ impl<T: Parse> Parse for Cfgable<T> {
     }
 }
 
-fn cfgable_extend_tokens<T: TryIntoTokens>(
-    metas: &[TokenStream],
-    inner: T,
-    q: &mut TokenQueue,
-) -> TtResult<(), T::Error> {
+fn cfgable_extend_tokens<T: IntoTokens>(metas: &[TokenStream], inner: T, q: &mut TokenQueue) {
     // we iterate in reverse, building up everything that `cfg_attr` parameterises in a single step.
     let Some((last_meta, rest)) = metas.split_last() else {
-        inner.try_extend_tokens(q)?;
-        return Ok(());
+        inner.extend_tokens(q);
+        return;
     };
 
     for meta in rest.iter() {
-        q.try_extend_from(quote! { cfg_attr })?;
+        q.extend_from(quote! { cfg_attr });
         q.open_group(Delimiter::Parenthesis);
-        q.try_extend_from(quote! { $meta })?;
+        q.extend_from(quote! { $meta });
     }
 
-    q.try_extend_from(quote! { $last_meta, $inner })?;
+    q.extend_from(quote! { $last_meta, $inner });
 
     for _ in 0..rest.len() {
         q.close_and_enqueue_group();
     }
-
-    Ok(())
 }
 
 impl<T> Cfgable<T> {
-    pub fn try_extend_tokens_as_cfg(&self, buf: &mut TokenQueue) -> TtResult<()> {
+    pub fn extend_tokens_as_cfg(&self, buf: &mut TokenQueue) {
         let Some((last, rest)) = self.cfg_attr_metas.split_last() else {
-            return Ok(());
+            return;
         };
 
         cfgable_extend_tokens(&rest, quote! { cfg($last) }, buf)
@@ -130,25 +122,21 @@ impl<T> Cfgable<T> {
     /// Reparameterises a `cfg_attr` attribute into a `cfg`.
     ///
     /// For example, `cfg_attr(foo, cfg_attr(bar, baz))` becomes `cfg_attr(foo, cfg(bar))`.
-    pub fn try_to_tokens_as_cfg(&self) -> TtResult<TokenQueue> {
-        let mut buf = TokenQueue::new();
-        self.try_extend_tokens_as_cfg(&mut buf)?;
-        Ok(buf)
+    pub fn to_tokens_as_cfg(&self) -> TokenQueue {
+        let mut q = TokenQueue::new();
+        self.extend_tokens_as_cfg(&mut q);
+        q
     }
 }
 
-impl<T: TryIntoTokens> TryIntoTokens for Cfgable<T> {
-    type Error = T::Error;
-
-    fn try_extend_tokens(self, buf: &mut TokenQueue) -> TtResult<(), T::Error> {
+impl<T: IntoTokens> IntoTokens for Cfgable<T> {
+    fn extend_tokens(self, buf: &mut TokenQueue) {
         cfgable_extend_tokens(&self.cfg_attr_metas, self.inner, buf)
     }
 }
 
-impl<T: TryToTokens> TryToTokens for Cfgable<T> {
-    type Error = T::Error;
-
-    fn try_extend_tokens_ref(&self, buf: &mut TokenQueue) -> TtResult<(), T::Error> {
+impl<T: ToTokens> ToTokens for Cfgable<T> {
+    fn extend_tokens_ref(&self, buf: &mut TokenQueue) {
         cfgable_extend_tokens(&self.cfg_attr_metas, &self.inner, buf)
     }
 }
@@ -249,17 +237,13 @@ impl<O: ToSpan, I: ToSpan> ToSpan for Attribute<O, I> {
     }
 }
 
-impl<E: From<Infallible> + Error, O: TryIntoTokens<Error = E>, I: TryIntoTokens<Error = E>>
-    TryIntoTokens for Attribute<O, I>
-{
-    type Error = E;
-
-    fn try_extend_tokens(self, buf: &mut TokenQueue) -> TtResult<(), E> {
+impl<O: IntoTokens, I: IntoTokens> IntoTokens for Attribute<O, I> {
+    fn extend_tokens(self, buf: &mut TokenQueue) {
         match self {
-            Attribute::Outer { contents } => buf.try_extend_from(quote! {
+            Attribute::Outer { contents } => buf.extend_from(quote! {
                 #[$contents]
             }),
-            Attribute::Inner { bang, contents } => buf.try_extend_from(quote! {
+            Attribute::Inner { bang, contents } => buf.extend_from(quote! {
                 #$bang[$contents]
             }),
         }

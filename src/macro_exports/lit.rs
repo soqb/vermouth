@@ -1,10 +1,10 @@
 //! Compile-time literal parsing for quasi-quoting.
 
-use std::{convert::Infallible, ffi::CStr, str::FromStr};
+use std::ffi::CStr;
 
-use proc_macro::{Literal, TokenStream};
+use proc_macro::Literal;
 
-use crate::{ReparseError, TokenQueue, TryIntoTokens, TtResult, ctfe};
+use crate::{IntoTokens, TokenQueue, ctfe};
 
 /// A hacky representation of a partially-parsed literal.
 ///
@@ -27,21 +27,12 @@ impl<T: LitContents, const REGIME: u8> DelayedLiteral<T, REGIME> {
     }
 }
 
-impl<T: LitContents, const REGIME: u8> TryIntoTokens for DelayedLiteral<T, REGIME> {
-    type Error = Infallible;
-
+impl<T: LitContents, const REGIME: u8> IntoTokens for DelayedLiteral<T, REGIME> {
     #[inline]
-    fn try_extend_tokens(self, buf: &mut TokenQueue) -> TtResult<()> {
+    fn extend_tokens(self, buf: &mut TokenQueue) {
         let resolution = const { Regime::parse(REGIME, T::PARSERS) }.unwrap();
         buf.push(resolution(self.data));
-        Ok(())
     }
-}
-
-pub fn fallback(text: &'static str, buf: &mut TokenQueue) -> TtResult<()> {
-    let tt = TokenStream::from_str(text).map_err(move |lex| ReparseError::from_lit(lex, text))?;
-    buf.extend(tt);
-    Ok(())
 }
 
 /// The kind of literal a stringified token represents.

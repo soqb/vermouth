@@ -1,5 +1,5 @@
 use proc_macro::{Span, TokenStream, TokenTree};
-use vermouth::{Diagnostic, DiagnosticLevel, Expected, Parser};
+use vermouth::{Diagnostic, DiagnosticLevel, Expected, IntoTokens, Parser};
 
 fn parrot_diagnostic_impl(cx: &mut Parser) -> vermouth::Result<()> {
     let level = cx.eat_expectantly(
@@ -37,5 +37,5 @@ fn parrot_diagnostic_impl(cx: &mut Parser) -> vermouth::Result<()> {
 pub fn parrot_diagnostic(tokens: TokenStream) -> TokenStream {
     let ref mut cx = Parser::new(tokens, Span::call_site());
     let _ = parrot_diagnostic_impl(cx).map_err(|exp| cx.report(exp));
-    cx.emit_diagnostics().into()
+    cx.emit_diagnostics().into_tokens().into()
 }

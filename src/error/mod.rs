@@ -1,9 +1,9 @@
 use core::fmt;
-use std::{borrow::Cow, convert::Infallible, mem::replace};
+use std::{borrow::Cow, mem::replace};
 
 use proc_macro::Span;
 
-use crate::{Parser, ParserPos, ToSpan, TokenQueue, TryIntoTokens, TryToTokens, TtResult};
+use crate::{IntoTokens, Parser, ParserPos, ToSpan, TokenQueue};
 
 #[cfg_attr(feature = "unstable-diagnostics-backend", path = "emit_unstable.rs")]
 mod emit;
@@ -474,14 +474,12 @@ impl Diagnostic {
     }
 
     #[must_use = "accumulated errors must be returned from the proc-macro."]
-    pub fn emit(self) -> impl TryIntoTokens<Error = Infallible> {
+    pub fn emit(self) -> impl IntoTokens {
         self.kind
     }
 }
-impl TryIntoTokens for DiagnosticKind {
-    type Error = Infallible;
-
-    fn try_extend_tokens(self, q: &mut TokenQueue) -> TtResult<()> {
+impl IntoTokens for DiagnosticKind {
+    fn extend_tokens(self, q: &mut TokenQueue) {
         match self {
             DiagnosticKind::Expected(exp) => {
                 emit::emit(q, DiagnosticLevel::Error, exp.pos.span(), &exp.to_string())
@@ -491,11 +489,9 @@ impl TryIntoTokens for DiagnosticKind {
             }
             DiagnosticKind::Join(errors) => {
                 for err in errors {
-                    err.try_extend_tokens(q)?;
+                    err.extend_tokens(q);
                 }
             }
         }
-
-        Ok(())
     }
 }

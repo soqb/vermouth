@@ -127,12 +127,8 @@ pub mod attributes;
 
 #[cfg(all(test, feature = "attributes", feature = "quote"))]
 mod tests {
-    use std::convert::Infallible;
-
     use proc_macro::{Ident, Literal, Span, TokenStream, TokenTree};
 
-    #[cfg(feature = "attributes")]
-    use crate::TtResult;
     use crate::{
         Expected, Parse, Parser, ParserPos, Result, Spanned, attributes::Attribute, punct_pat,
         quote,
@@ -141,8 +137,8 @@ mod tests {
     ඞ_declare_test!();
 
     #[test]
-    fn parsing() -> TtResult<()> {
-        let tokens = quote! { a + b == c }.try_into()?;
+    fn parsing() {
+        let tokens = quote! { a + b == c }.into();
         let ref mut cx = Parser::new(tokens, Span::call_site());
         assert_eq!(
             cx.eat_ident().map(Spanned::from).map(|s| s == "a"),
@@ -158,14 +154,12 @@ mod tests {
             cx.eat_ident().map(Spanned::from).map(|s| s == "c"),
             Ok(true),
         );
-        Ok(())
     }
 
     #[test]
-    fn quote_interpolate() -> TtResult<()> {
+    fn quote_interpolate() {
         let a = ();
-        let _tokens: TokenStream = quote! { $a }.ascribe::<Infallible>().try_into().unwrap();
-        Ok(())
+        let _tokens: TokenStream = quote! { $a }.into();
     }
 
     #[test]
@@ -286,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn quote_literals() -> TtResult<()> {
+    fn quote_literals() {
         let quoted = quote! {
             144
             12u8
@@ -301,7 +295,7 @@ mod tests {
             'x'
             b'y'
         }
-        .try_into()?;
+        .into();
         let manual = [
             tt(Literal::u8_unsuffixed(144)),
             tt(Literal::u8_suffixed(12)),
@@ -319,15 +313,13 @@ mod tests {
         .into_iter()
         .collect();
         assert_streams_match(quoted, manual);
-
-        Ok(())
     }
 
     #[test]
     #[cfg(feature = "attributes")]
-    fn attributes() -> TtResult<()> {
-        let tokens = quote! { #[foo] #![bar] };
-        let ref mut cx = Parser::new(tokens.try_into()?, Span::call_site());
+    fn attributes() {
+        let tokens = quote! { #[foo] #![bar] }.into();
+        let ref mut cx = Parser::new(tokens, Span::call_site());
 
         struct Foo;
         struct Bar;
@@ -366,7 +358,5 @@ mod tests {
             <Attribute<Foo, Bar>>::parse(cx),
             Ok(Attribute::Inner { contents: Bar, .. }),
         ));
-
-        Ok(())
     }
 }
