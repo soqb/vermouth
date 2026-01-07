@@ -5,7 +5,7 @@ pub struct Snapshot {
     pub n: u64,
     pub mean: f64,
     pub biased_sample_variance: f64,
-    pub unbiased_sample_variance: f64,
+    pub unbiased_sample_variance: Option<f64>,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -45,7 +45,7 @@ impl Wip {
         Snapshot {
             mean,
             biased_sample_variance: sdm / n,
-            unbiased_sample_variance: sdm / (n - 1.),
+            unbiased_sample_variance: if n > 1. { Some(sdm / (n - 1.)) } else { None },
             n: self.n(),
         }
     }

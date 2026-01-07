@@ -1,3 +1,5 @@
+//! Extension traits for token trees and streams.
+
 use proc_macro::TokenTree;
 
 /// A trait extending the behaviour of [`TokenTree`]s.

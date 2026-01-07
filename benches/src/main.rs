@@ -3,9 +3,9 @@ use macrobench::*;
 
 fn main() {
     macrobench::main("vermouth", |cx| {
-        many_literals(cx);
         much_nesting(cx);
         many_tokens(cx);
+        many_literals(cx);
     })
 }
 
@@ -21,11 +21,11 @@ fn bench_job(
     let mut cfg = JobCfg::default();
     cfg.rustflags = Some(format!("-Copt-level={lvl}").into());
 
-    let bench = group.bench(&format!("{name}-o{lvl}"), Time);
+    let bench = group.bench(format!("{name}-o{lvl}"), Time);
     let dir = format!("../target/bench/{dir}");
 
     MarkEnv { n: 4 }.measure(
-        || target.new_job(&cfg, &dir, i as u64).run(),
+        || target.new_job(&cfg, &dir, i).run(),
         || bench.warm(),
         |mk, mt| {
             let mt = mt.such_that(|tt| tt.name == time).next().unwrap();

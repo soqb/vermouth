@@ -1,12 +1,14 @@
+//! The [`ToTokens`] and [`IntoTokens`] traits for idiomatic tokenization.
+
 use std::convert::Infallible;
 
-use proc_macro::{Group, Ident, Literal, Punct, TokenStream};
+use proc_macro::TokenStream;
 
 use crate::TokenQueue;
 
 /// Methods for converting by-value into [`TokenQueue`].
 ///
-/// See also [`TryToTokens`], the analagous by-reference trait.
+/// See also [`IntoTokens`], the analagous by-reference trait.
 pub trait IntoTokens: Sized {
     /// Analagous to [`Iterator::size_hint`].
     ///
@@ -160,31 +162,3 @@ impl<T: IntoTokens> IntoTokens for Option<T> {
         self.as_ref().map_or((0, None), T::queue_size_hint)
     }
 }
-
-macro_rules! impl_to_tokens_tt {
-    ($($t:ty),*) => {
-        $(
-            impl IntoTokens for $t {
-                fn extend_tokens(self, q: &mut TokenQueue) {
-                    q.push(self);
-                }
-
-                fn queue_size_hint(&self) -> (usize, Option<usize>) {
-                    (1, Some(1))
-                }
-            }
-
-            impl ToTokens for $t {
-                fn extend_tokens_ref(&self, q: &mut TokenQueue) {
-                    q.push(self.clone());
-                }
-
-                fn queue_size_hint_ref(&self) -> (usize, Option<usize>) {
-                    (1, Some(1))
-                }
-            }
-        )*
-    };
-}
-
-impl_to_tokens_tt! { Punct, Ident, Group, Literal }

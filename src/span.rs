@@ -1,3 +1,5 @@
+//! [`Span`]-handling utilities.
+
 use std::ops::{Deref, DerefMut};
 
 use proc_macro::{Ident, Span, TokenTree};

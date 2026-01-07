@@ -4,7 +4,6 @@
 #![doc(
     html_favicon_url = "https://raw.githubusercontent.com/soqb/vermouth/trunk/assets/logo-icon.png"
 )]
-#![allow(clippy::toplevel_ref_arg)]
 #![cfg_attr(
     feature = "unstable-diagnostics-backend",
     feature(
@@ -14,6 +13,7 @@
     )
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![warn(missing_docs, clippy::missing_docs_in_private_items)]
 #![forbid(unsafe_code)]
 
 //! _Fortification against [sin][`syn`]._

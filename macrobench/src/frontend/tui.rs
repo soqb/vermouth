@@ -88,6 +88,7 @@ impl<'a> Runtime<'a> {
             };
 
             use crossterm::event::*;
+            #[allow(clippy::redundant_guards, reason = "looks cleaner this way.")]
             match ev {
                 Event::Key(KeyEvent { code, .. }) if code == KeyCode::Char('q') => break,
                 Event::Resize(_, _) => redraw = true,
@@ -111,7 +112,7 @@ impl<'a> Runtime<'a> {
 
             if let Some(spare) = results_area.width.checked_sub(100) {
                 results_area.x += spare / 2;
-                results_area.width = results_area.width - spare;
+                results_area.width -= spare;
             }
 
             results_area.height -= 3;
@@ -197,7 +198,9 @@ impl<'a> Runtime<'a> {
                 titleline,
                 format!("{}: {}", metric.name(), snap.n).into(),
                 metric.display(snap.mean).to_string().into(),
-                format!("±{}", metric.display(snap.unbiased_sample_variance.sqrt())).into(),
+                snap.unbiased_sample_variance
+                    .map_or_else(String::new, |v| format!("±{}", metric.display(v.sqrt())))
+                    .into(),
             ]));
         }
 

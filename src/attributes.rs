@@ -2,7 +2,7 @@
 
 use std::marker::PhantomData;
 
-use proc_macro::{Delimiter, Punct, Span, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Group, Punct, Span, TokenStream, TokenTree};
 
 use crate::{
     Diagnostic, DiagnosticLevel, Eos, Expected, IntoTokens, Parse, Parser, Result, ToSpan,
@@ -53,6 +53,7 @@ pub struct Cfgable<T> {
     // FIXME: no evidence this architecture is better than the naive (recursive) approach.
     //     it was lowkey fun though. something something cache locality.
     cfg_attr_metas: Vec<TokenStream>,
+    /// The innermost attribute of the `cfg`.
     pub inner: T,
 }
 
@@ -93,21 +94,22 @@ impl<T: Parse> Parse for Cfgable<T> {
 fn cfgable_extend_tokens<T: IntoTokens>(metas: &[TokenStream], inner: T, q: &mut TokenQueue) {
     // we iterate in reverse, building up everything that `cfg_attr` parameterises in a single step.
     let Some((last_meta, rest)) = metas.split_last() else {
-        inner.extend_tokens(q);
+        q.extend_from(inner);
         return;
     };
 
-    for meta in rest.iter() {
-        q.extend_from(quote! { cfg_attr });
-        q.open_group(Delimiter::Parenthesis);
-        q.extend_from(quote! { $meta });
-    }
+    for _ in 0..rest.len() {}
 
+    q.open_substream();
     q.extend_from(quote! { $last_meta, $inner });
 
-    for _ in 0..rest.len() {
-        q.close_and_enqueue_group();
+    for meta in rest.iter().rev() {
+        let group = Group::new(Delimiter::Parenthesis, q.close_substream());
+        q.open_substream();
+        q.extend_from(quote! { $meta, cfg_attr $group });
     }
+
+    q.close_substream_and_push_as_group(Delimiter::Parenthesis);
 }
 
 impl<T> Cfgable<T> {
@@ -116,7 +118,7 @@ impl<T> Cfgable<T> {
             return;
         };
 
-        cfgable_extend_tokens(&rest, quote! { cfg($last) }, buf)
+        cfgable_extend_tokens(rest, quote! { cfg($last) }, buf)
     }
 
     /// Reparameterises a `cfg_attr` attribute into a `cfg`.
@@ -352,13 +354,13 @@ where
 
 pub trait AttrIterExt<O, I>: Iterator<Item = Attribute<O, I>> + Sized {
     fn fold_separately<Bo, Bi>(
-        mut self,
+        self,
         mut fold_outer: impl FnMut(Bo, O) -> Bo,
         mut fold_inner: impl FnMut(Bi, I) -> Bi,
         mut outer_init: Bo,
         mut inner_init: Bi,
     ) -> (Bo, Bi) {
-        while let Some(attr) = self.next() {
+        for attr in self {
             match attr {
                 Attribute::Outer { contents } => outer_init = fold_outer(outer_init, contents),
                 Attribute::Inner { contents, .. } => inner_init = fold_inner(inner_init, contents),

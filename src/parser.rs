@@ -1,3 +1,5 @@
+//! [A parser](Parser) for proc-macro input.
+
 use proc_macro::{Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 
 use crate::{Diagnostic, Expected, IntoTokens, Pattern, Result, ToSpan, TokenQueue};
@@ -71,6 +73,7 @@ mod indices {
             Self::new_raw(value)
         };
 
+        /// Creates a new non-zero [`SeenIdx`].
         #[inline]
         pub(crate) const fn new_raw(idx: u32) -> Self {
             SeenIdx {
@@ -78,6 +81,7 @@ mod indices {
             }
         }
 
+        /// Unwraps and shifts down the index.
         #[inline]
         pub(crate) fn to_u32(self) -> u32 {
             self.idx.get().wrapping_sub(1)
@@ -100,7 +104,7 @@ mod indices {
                 }
                 return none();
             }
-            let idx = (idx - n) as u32;
+            let idx = u32::try_from(idx - n).unwrap();
             Some(Self::new_raw(idx))
         }
 
@@ -110,6 +114,7 @@ mod indices {
         }
     }
 
+    /// A `u32`-packed representation of a parser position.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(crate) struct PosRepr {
         idx: u32,
@@ -125,7 +130,7 @@ mod indices {
             }
         }
 
-        #[inline]
+        #[cfg(test)]
         pub fn into_raw(self) -> u32 {
             self.idx
         }
@@ -173,7 +178,7 @@ impl Parser {
     pub fn new(stream: TokenStream, parent_span: Span) -> Self {
         let len = stream.clone().into_iter().count();
         Self {
-            stream: Stream::with_capacity(stream.into_iter(), len as u32),
+            stream: Stream::with_capacity(stream.into_iter(), len.try_into().unwrap()),
             #[cfg(not(feature = "proc-macro2"))]
             eos_span: parent_span.end(),
             #[cfg(feature = "proc-macro2")]
@@ -207,6 +212,7 @@ impl Parser {
         }
     }
 
+    /// Unit test function for validating parser position.
     #[cfg_attr(not(test), expect(dead_code, reason = "test-only function"))]
     pub(crate) fn raw_pos(&self) -> ParserPos {
         ParserPos {
@@ -530,7 +536,7 @@ impl ParserPos {
         self.repr == PosRepr::EOS
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[cfg(test)]
     pub(crate) fn into_raw(self) -> u32 {
         self.repr.into_raw()
     }

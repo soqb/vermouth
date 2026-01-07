@@ -53,15 +53,15 @@ pub enum Regime {
 
 impl Regime {
     const fn is_suffixed_int(s: &[u8]) -> bool {
-        match s {
+        matches!(
+            s,
             [.., b'u' | b'i', b's', b'i', b'z', b'e']
-            | [.., b'u' | b'i', b'1', b'2', b'8']
-            | [.., b'u' | b'i', b'6', b'4']
-            | [.., b'u' | b'i', b'3', b'2']
-            | [.., b'u' | b'i', b'1', b'6']
-            | [.., b'u' | b'i', b'8'] => true,
-            _ => false,
-        }
+                | [.., b'u' | b'i', b'1', b'2', b'8']
+                | [.., b'u' | b'i', b'6', b'4']
+                | [.., b'u' | b'i', b'3', b'2']
+                | [.., b'u' | b'i', b'1', b'6']
+                | [.., b'u' | b'i', b'8'],
+        )
     }
 
     const fn recognize_int(s: &[u8]) -> Regime {
@@ -73,10 +73,7 @@ impl Regime {
     }
 
     const fn is_suffixed_float(s: &[u8]) -> bool {
-        match s {
-            [.., b'f', b'6', b'4'] | [.., b'f', b'3', b'2'] => true,
-            _ => false,
-        }
+        matches!(s, [.., b'f', b'6', b'4'] | [.., b'f', b'3', b'2'])
     }
 
     const fn recognize_float(s: &[u8]) -> Regime {

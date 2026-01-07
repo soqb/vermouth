@@ -66,7 +66,7 @@ fn emit_warning(buf: &mut TokenQueue, span: Span, mut msg: String) {
             buf.push(Punct::new('=', Alone));
 
             msg.insert_str(0, "proc macro produced a warning: ");
-            msg.push_str("\n");
+            msg.push('\n');
             let mut lit = Literal::string(&msg);
 
             lit.set_span(span);

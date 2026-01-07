@@ -1,3 +1,5 @@
+//! General purpose buffer for token composition. See [`TokenQueue`].
+
 use std::{fmt, num::NonZero};
 
 use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Span, TokenStream, TokenTree};
@@ -6,6 +8,8 @@ use crate::IntoTokens;
 
 /// General purpose buffer for token composition.
 ///
+/// See also [`quote`](crate::quote!) and [`Transcriber`](crate::Transcriber).
+///
 /// # I Have No Mouth And I Must [`TokenStream`]
 /// ***TLDR:*** `TokenQueue` is like the `Vec<SmallVec<[T; 1]>>` to [`TokenStream`]'s `Arc<Vec<T>>`.
 ///
@@ -13,8 +17,8 @@ use crate::IntoTokens;
 /// Under the hood, it holds a clone-on-write handle to an underlying buffer
 /// so it is cheap to share and traverse, but not cheap to modify.
 ///
-/// The API surface of [`TokenStream`] is also rather constrained:
-/// no storage preallocation, by-reference traversal, or
+/// The API surface of [`TokenStream`] is also too constrained for our purposes,
+/// prohibiting buffer preallocation, buffer reuse, slicing, and by-reference traversal.
 ///
 /// `TokenQueue`, by contrast, owns its contents and so is cheap to modify.
 /// We can also preallocate the underlying buffer and so escape quadratic time complexity.
@@ -23,19 +27,70 @@ use crate::IntoTokens;
 /// ("commits") happen all at once,
 /// significantly reducing the overhead of dealing with the proc-macro server.
 ///
-// / # By Analogy
-// / Dealing with the proc-macro server feels a little like GPU programming at times.
-// / Under this analogy, `TokenQueue` is our "command queue."
-// / Writing to the queue is fast, and ["commits"](TokenQueue#impl-From%3CTokenQueue%3E-for-TokenStream) occur up to once,
-// / all at once, reducing the "API cost" of sending messages to an from the server.
+/// There are many methods for interacting directly with the queue,
+/// but it is most common to combine [`extend_from`](TokenQueue::extend_from) and [`quote`](crate::quote!):
+///
+/// ```
+/// # vermouth::ඞ_declare_test!();
+/// # use vermouth::{quote, TokenQueue};
+/// let ref mut q = TokenQueue::new();
+/// q.extend_from(quote! { 1 + 2 });
+/// q.extend_from(quote! { = });
+/// q.extend_from(quote! { 3 });
+/// // q: `1 + 2 = 3`
+/// ```
+///
+/// # Substreams
+///
+/// To ensure high memory utilisation, we would like to reuse the same heap allocation
+/// for constructing both a root [`TokenStream`], and the `TokenStream`s nested within any [`Group`]s it contains.
+///
+/// To this end, [`TokenQueue::open_substream`] and [`TokenQueue::close_substream`]
+/// reconfigure the queue to begin collecting tokens which will go towards building a nested stream.
+///
+/// For groups in particular, there are the [`close_substream_and_push_as_group`]
+/// and [`close_substream_and_push_as_group_with_span`] helper methods:
+///
+/// [`close_substream_and_push_as_group`]: TokenQueue::close_substream_and_push_as_group
+/// [`close_substream_and_push_as_group_with_span`]: TokenQueue::close_substream_and_push_as_group_with_span
+///
+/// ```
+/// # vermouth::ඞ_declare_test!();
+/// # use proc_macro::Delimiter;
+/// # use vermouth::{quote, TokenQueue};
+/// let ref mut q = TokenQueue::new();
+/// q.extend_from(quote! { let x = });
+/// q.open_substream();
+/// q.extend_from(quote! { 1, 2, 3 });
+/// q.close_substream_and_push_as_group(Delimiter::Parenthesis);
+/// q.extend_from(quote! { ; });
+/// // q: `let x = (1, 2, 3);`
+/// ```
+///
+/// It is also possible to factor out substreams idiomatically.
+/// This order of operations has better memory efficiency, but has no practical performance benefit:
+///
+/// ```
+/// # vermouth::ඞ_declare_test!();
+/// # use proc_macro::{Group, Delimiter};
+/// # use vermouth::{quote, TokenQueue};
+/// let ref mut q = TokenQueue::new();
+/// q.open_substream();
+/// q.extend_from(quote! { 1, 2, 3 });
+/// let expr = Group::new(Delimiter::Parenthesis, q.close_substream());
+/// q.extend_from(quote! { let x = $expr; });
+/// // q: `let x = (1, 2, 3);`
+/// ```
+///
+/// Internally, the stack of open substreams is an intrusive, singly-linked list,
+/// ensuring opening and closing are fast.
 #[derive(Debug, Clone)]
 pub struct TokenQueue {
     chunks: Vec<Chunk>,
     /// Index of the top of the group stack.
-    group_stack_top_ptr: Option<usize>,
+    substream_stack_top_ptr: Option<usize>,
 }
 
-// NB: not the `Debug` impl we use for the queue, but useful in its own right.
 #[derive(Debug, Clone)]
 enum Chunk {
     PutGroup(Group),
@@ -43,24 +98,27 @@ enum Chunk {
     PutLiteral(Literal),
     PutPunct(Punct),
     Embed(TokenStream),
-    OpenGroup(GroupHeader),
+    OpenSubstream(SubstreamHeader),
 }
 
+/// See [the public documentation](TokenQueue#substreams).
 #[derive(Debug, Clone)]
-struct GroupHeader {
-    delim: Delimiter,
-    /// The negative offset of the parent group within the chunk buffer.
-    parent: Option<NonZero<usize>>,
+struct SubstreamHeader {
+    /// If `Some`, this is the offset of this substream relative to the parent within the chunk buffer.
+    /// `NonZero` since no chunk is its own parent.
+    /// If `None`, this is a top-level substream.
+    parent: Option<NonZero<u32>>,
 }
 
-impl GroupHeader {
-    pub fn new(addr: usize, delim: Delimiter, parent: Option<usize>) -> GroupHeader {
-        let parent = parent.map(|a| NonZero::new(addr - a).unwrap());
-        GroupHeader { delim, parent }
+impl SubstreamHeader {
+    pub fn new(addr: usize, parent: Option<usize>) -> SubstreamHeader {
+        let parent = parent.map(|a| NonZero::new(u32::try_from(addr - a).unwrap()).unwrap());
+        SubstreamHeader { parent }
     }
 
     pub fn parent(&self, addr: usize) -> Option<usize> {
-        self.parent.map(|n| addr - n.get())
+        self.parent
+            .map(|n| addr - usize::try_from(n.get()).unwrap())
     }
 }
 
@@ -75,7 +133,7 @@ impl From<TokenTree> for Chunk {
     }
 }
 
-pub(crate) struct DisplayChunks<'a>(&'a [Chunk]);
+struct DisplayChunks<'a>(&'a [Chunk]);
 impl<'a> fmt::Display for DisplayChunks<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn delim_wings(delim: Delimiter) -> (&'static str, &'static str) {
@@ -100,14 +158,14 @@ impl<'a> fmt::Display for DisplayChunks<'a> {
             Ok(())
         }
 
-        fn fmt_group<'a>(group: &Group, f: &mut fmt::Formatter<'_>, n: usize) -> fmt::Result {
+        fn fmt_group(group: &Group, f: &mut fmt::Formatter<'_>, n: usize) -> fmt::Result {
             let (open, close) = delim_wings(group.delimiter());
             f.write_str(open)?;
             fmt_ts(group.stream().into_iter(), f, n + 1)?;
             f.write_str(close)
         }
 
-        fn fmt_ts<'a>(
+        fn fmt_ts(
             ts: proc_macro::token_stream::IntoIter,
             f: &mut fmt::Formatter<'_>,
             n: usize,
@@ -126,22 +184,16 @@ impl<'a> fmt::Display for DisplayChunks<'a> {
             Ok(())
         }
 
-        fn fmt_chunks<'a>(
-            chunks: &'a [Chunk],
-            f: &mut fmt::Formatter<'_>,
-            mut n: usize,
-        ) -> fmt::Result {
-            let mut chunks = chunks.iter();
-            while let Some(chunk) = chunks.next() {
+        fn fmt_chunks(chunks: &[Chunk], f: &mut fmt::Formatter<'_>, mut n: usize) -> fmt::Result {
+            for chunk in chunks {
                 match chunk {
                     Chunk::Embed(ts) => fmt_ts(ts.clone().into_iter(), f, n)?,
                     Chunk::PutGroup(group) => fmt_group(group, f, n)?,
                     Chunk::PutIdent(id) => write!(f, "{id}")?,
                     Chunk::PutPunct(p) => write!(f, "{p}")?,
                     Chunk::PutLiteral(lit) => write!(f, "{lit}")?,
-                    Chunk::OpenGroup(hdr) => {
-                        let (open, _) = delim_wings(hdr.delim);
-                        f.write_str(open)?;
+                    Chunk::OpenSubstream(_) => {
+                        f.write_str("∅")?;
                         n += 1;
                     }
                 }
@@ -154,6 +206,7 @@ impl<'a> fmt::Display for DisplayChunks<'a> {
     }
 }
 
+/// Implements `From` over various `TokenTree`-likes for [`Chunk`].
 macro_rules! impl_into_chunk_for_tt {
     ($($var:ident($ty:ty),)*) => {
         $(
@@ -181,43 +234,53 @@ impl From<TokenStream> for Chunk {
     }
 }
 
-/// Invokes the given macro with all of the implementors of `Into<Chunk>`.
-///
-/// This is a kind of AOT monomorphisation, which is not done for performance,
-/// but instead purely for the sake of privacy (we don't want to leak [`Chunk`], so we don't put it in trait bounds).
-macro_rules! enumerate_into_chunk_implementors {
-    ($macro:ident) => {
-        $macro! { Chunk, TokenTree, TokenStream, Punct, Ident, Literal, Group }
-    };
-}
-
-/// See [`TokenQueue::push`].
-pub trait PushToken {
-    fn push_to(self, q: &mut TokenQueue);
-}
-
-macro_rules! impl_pushtoken_for_into_chunk {
-    ($($ty:ty),*) => {
+/// Implements `IntoTokens` for various `TokenTree`-like types.
+macro_rules! impl_into_tokens_for_tt {
+    ($($t:ty),*) => {
         $(
-            impl PushToken for $ty {
-                #[inline]
-                fn push_to(self, q: &mut TokenQueue) {
+            impl IntoTokens for $t {
+                fn extend_tokens(self, q: &mut TokenQueue) {
                     q.chunks.push(self.into());
+                }
+
+                fn queue_size_hint(&self) -> (usize, Option<usize>) {
+                    (1, Some(1))
                 }
             }
         )*
     };
 }
 
-enumerate_into_chunk_implementors!(impl_pushtoken_for_into_chunk);
+impl_into_tokens_for_tt! { TokenTree, Punct, Ident, Group, Literal }
 
-impl<T: PushToken> PushToken for Option<T> {
-    fn push_to(self, q: &mut TokenQueue) {
-        if let Some(this) = self {
-            this.push_to(q);
-        }
-    }
+/// Invokes the given macro with all of the implementors of `Into<Chunk>`.
+///
+/// This is a kind of AOT monomorphisation, which is not done for performance,
+/// but instead purely for the sake of privacy (we don't want to leak [`Chunk`], so we don't put it in trait bounds).
+macro_rules! enumerate_into_chunk_implementors {
+    ($macro:ident) => {
+        // NB: Not `TokenTree`.
+        // we want to avoid the footgun of like `q.extend(stream)` when `q.push(stream)` will always be faster.
+        $macro! { TokenStream, Punct, Ident, Literal, Group }
+    };
 }
+
+/// See [`TokenQueue::push`].
+pub trait PushToken: IntoTokens {}
+
+/// Implements [`PushToken`] for `Chunk`-likes.
+macro_rules! impl_push_token_for_into_chunk {
+    ($($ty:ty),*) => {
+        $(
+            impl PushToken for $ty {}
+        )*
+    };
+}
+
+enumerate_into_chunk_implementors!(impl_push_token_for_into_chunk);
+
+impl PushToken for TokenTree {}
+impl<T: PushToken> PushToken for Option<T> {}
 
 impl Default for TokenQueue {
     fn default() -> Self {
@@ -234,7 +297,7 @@ impl TokenQueue {
     pub const fn new() -> TokenQueue {
         TokenQueue {
             chunks: Vec::new(),
-            group_stack_top_ptr: None,
+            substream_stack_top_ptr: None,
         }
     }
 
@@ -242,7 +305,7 @@ impl TokenQueue {
     pub fn with_capacity(n: usize) -> TokenQueue {
         TokenQueue {
             chunks: Vec::with_capacity(n),
-            group_stack_top_ptr: None,
+            substream_stack_top_ptr: None,
         }
     }
 
@@ -277,7 +340,7 @@ impl TokenQueue {
     /// * [`Literal`]
     /// * [`Group`]
     pub fn push<T: PushToken>(&mut self, t: T) {
-        t.push_to(self);
+        self.extend_from(t);
     }
 
     /// Extends an existing [`TokenStream`] with the contents of this queue.
@@ -286,51 +349,61 @@ impl TokenQueue {
         builder.drain_to::<(), _>(ts);
     }
 
-    /// Copies the contents of the given `TokenQueue`
-    pub fn extend_from<T: IntoTokens>(&mut self, rhs: T) {
+    /// Enqueues some tokens via [`IntoTokens::extend_tokens`].
+    pub fn extend_from<T: IntoTokens>(&mut self, t: T) {
         // self.chunks.extend_from_slice(&rhs.chunks);
         // self.stack_depth += rhs.stack_depth;
-        rhs.extend_tokens(self)
+        t.extend_tokens(self)
     }
 
-    pub fn open_group(&mut self, delim: Delimiter) {
+    /// Opens a new substream. See [the substream documentation](#substreams).
+    pub fn open_substream(&mut self) {
         let ptr = self.chunks.len();
-        let group = GroupHeader::new(ptr, delim, self.group_stack_top_ptr);
-        self.chunks.push(Chunk::OpenGroup(group));
-        self.group_stack_top_ptr = Some(ptr);
+        let group = SubstreamHeader::new(ptr, self.substream_stack_top_ptr);
+        self.chunks.push(Chunk::OpenSubstream(group));
+        self.substream_stack_top_ptr = Some(ptr);
     }
 
-    #[must_use = "`close_group_with_span` returns a group, rather than enqueuing it."]
-    pub fn close_group_with_span(&mut self, span: Option<Span>) -> Group {
-        let Some(ptr) = self.group_stack_top_ptr else {
+    /// Closes and returns the top substream. See [the substream documentation](#substreams).
+    #[must_use = "`close_substream` returns a `TokenStream` and does not enqueue anything."]
+    pub fn close_substream(&mut self) -> TokenStream {
+        let Some(ptr) = self.substream_stack_top_ptr else {
             panic!("{POP_NO_PUSH_MSG}")
         };
 
         let mut drain = self.chunks.drain(ptr..);
-        let Some(Chunk::OpenGroup(hdr)) = drain.next() else {
-            panic!("expected chunk at index {ptr} to be a `PushGroup`");
+        let Some(Chunk::OpenSubstream(hdr)) = drain.next() else {
+            panic!("expected chunk at index {ptr} to be a `OpenSubstream`");
         };
 
-        self.group_stack_top_ptr = hdr.parent(ptr);
+        self.substream_stack_top_ptr = hdr.parent(ptr);
 
-        let ts = TokenStreamBuilder::new(drain).drain_to_token_stream();
-        let mut group = Group::new(hdr.delim, ts);
+        TokenStreamBuilder::new(drain).drain_to_token_stream()
+    }
+
+    /// Closes and enqueues the top substream. See [the substream documentation](#substreams).
+    pub fn close_substream_and_push_as_group_with_span(
+        &mut self,
+        delim: Delimiter,
+        span: Option<Span>,
+    ) {
+        let mut group = Group::new(delim, self.close_substream());
         if let Some(span) = span {
             group.set_span(span);
         }
-        group
-    }
-
-    #[must_use = "`close_group` returns a group, rather than enqueuing it."]
-    pub fn close_group(&mut self) -> Group {
-        self.close_group_with_span(None)
-    }
-
-    pub fn close_and_enqueue_group(&mut self) {
-        let group = self.close_group();
         self.push(group);
     }
 
+    /// Closes and enqueues the top substream. See [the substream documentation](#substreams).
+    pub fn close_substream_and_push_as_group(&mut self, delim: Delimiter) {
+        self.close_substream_and_push_as_group_with_span(delim, None);
+    }
+
+    /// Formats the queue as rust source.
+    ///
+    /// # Stability
+    /// This is primarily for debugging purposes,
+    /// no guarantees are made about the format or its fidelity.
     pub fn display(&self) -> impl fmt::Display {
         DisplayChunks(&self.chunks)
     }
@@ -339,28 +412,37 @@ impl TokenQueue {
 fn token_size_hint_for_chunks(chunks: &[Chunk]) -> (usize, Option<usize>) {
     let mut n = 0;
     let mut bounded_above = true;
-    let mut chunks = chunks.iter();
 
-    while let Some(chunk) = chunks.next() {
+    for chunk in chunks {
         match chunk {
             Chunk::Embed(_) => bounded_above = false,
             Chunk::PutGroup(_) | Chunk::PutIdent(_) | Chunk::PutLiteral(_) | Chunk::PutPunct(_) => {
                 n += 1
             }
             // push group is just element shuffling, i.e. entirely immaterial.
-            Chunk::OpenGroup(_) => (),
+            Chunk::OpenSubstream(_) => (),
         }
     }
 
     (n, bounded_above.then_some(n))
 }
 
+/// Implements `Extend` and `FromIterator` over the various `Chunk`-likes.
 macro_rules! impl_extend_for_into_chunk {
     ($($ty:ty),*) => {
         $(
             impl Extend<$ty> for TokenQueue {
                 fn extend<T: IntoIterator<Item = $ty>>(&mut self, tcs: T) {
                     self.chunks.extend(tcs.into_iter().map(Into::<Chunk>::into));
+                }
+            }
+
+            impl FromIterator<$ty> for TokenQueue {
+                fn from_iter<I: IntoIterator<Item = $ty>>(it: I) -> TokenQueue {
+                    TokenQueue {
+                        chunks: it.into_iter().map(Into::<Chunk>::into).collect(),
+                        substream_stack_top_ptr: None
+                    }
                 }
             }
         )*
@@ -373,7 +455,7 @@ impl From<TokenStream> for TokenQueue {
     fn from(ts: TokenStream) -> TokenQueue {
         TokenQueue {
             chunks: vec![Chunk::Embed(ts)],
-            group_stack_top_ptr: None,
+            substream_stack_top_ptr: None,
         }
     }
 }
@@ -397,8 +479,7 @@ impl IntoTokens for TokenQueue {
 impl From<TokenQueue> for TokenStream {
     fn from(mut q: TokenQueue) -> TokenStream {
         let mut builder = TokenStreamBuilder::new(q.chunks.drain(..));
-        let ts = builder.drain_to_token_stream();
-        ts
+        builder.drain_to_token_stream()
     }
 }
 
@@ -415,7 +496,7 @@ impl<'a> ChunkBuf for std::vec::Drain<'a, Chunk> {
     }
 }
 
-/// Parses a buffer of [`Chunk`]s until either EOS or a [`Pop`](Chunk::Pop).
+/// Parses a buffer of [`Chunk`]s until EOS.
 struct TokenStreamBuilder<S> {
     ts_queue: Option<proc_macro::token_stream::IntoIter>,
     chunks: S,
@@ -480,11 +561,11 @@ impl<S: ChunkBuf> TokenStreamBuilder<S> {
     fn drain_to<B: FromTokens<T>, T>(&mut self, t: T) -> B {
         if let Some(ts) = self.take_as_single_stream() {
             // if the buf contains just a single steam elem, use that directly.
-            // this is useful for something like `quote! { #[@meta] }`.
+            // this is useful for something like `quote! { #[$meta] }`.
             B::from_lone(t, ts)
         } else if let Some(tss) = self.as_unwrapped_streams() {
             // if the buf is all streams, get `proc_macro` to concat them directly, rather than copying ourselves.
-            // this is useful for something like `quote! { @attrs @item @trait_impls }`.
+            // this is useful for something like `quote! { $attrs $item $trait_impls }`.
             B::from_streams(t, tss)
         } else {
             B::from_tokens(t, self)
@@ -546,7 +627,7 @@ impl<S: ChunkBuf> Iterator for TokenStreamBuilder<S> {
             Some(Chunk::PutIdent(tt)) => Some(tt.into()),
             Some(Chunk::PutPunct(tt)) => Some(tt.into()),
             Some(Chunk::PutLiteral(tt)) => Some(tt.into()),
-            Some(Chunk::OpenGroup(_)) => panic!("{PUSH_NO_POP_MSG}"),
+            Some(Chunk::OpenSubstream(_)) => panic!("{PUSH_NO_POP_MSG}"),
         }
     }
 }

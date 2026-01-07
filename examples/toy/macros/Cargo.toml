@@ -5,8 +5,11 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
+[lints]
+workspace = true
+
 [lib]
 proc-macro = true
 
 [dependencies]
-vermouth = { workspace = true, features = ["warnings"] }
+vermouth = { workspace = true, features = ["warnings", "attributes"] }

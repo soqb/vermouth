@@ -9,6 +9,9 @@ rust-version = "1.92"
 exclude = ["assets/"]
 autobenches = false
 
+[lints]
+workspace = true
+
 [workspace]
 resolver = "3"
 members = [
@@ -32,13 +35,22 @@ macrobench = { version = "0.1.0", path = "macrobench" }
 # that `proc-macro2` matches `proc_macro` in enough detail.
 version = ">=1.0.103, <=1.0.104"
 
+[workspace.lints.clippy]
+toplevel_ref_arg = "allow"
+type_complexity = "allow"
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"
+
+# [workspace.lints.rust]
+# missing_docs = "warn"
+
 [dependencies]
 smallvec = { workspace = true }
 document-features = { workspace = true, optional = true }
 proc-macro2 = { workspace = true, optional = true }
 
 [features]
-default = ["quote", "attributes"]
+default = ["quote"]
 
 # NB: we use the `document_features` crate.
 #! ## Stable Features

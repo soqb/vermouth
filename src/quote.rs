@@ -2,11 +2,13 @@
 
 use proc_macro::{Punct, Spacing, TokenStream};
 
-use crate::{IntoTokens, ToTokens, TokenQueue, for_all_punct_seqs};
+use crate::{IntoTokens, ToTokens, TokenQueue};
 
 /// Lazy quasi-quoting for Rust source.
 ///
-/// Returns a value (a [`Transcriber`]) implementing [`TryToTokens`] which can be used to build a [`TokenStream`].
+/// See also [`Transcriber`](crate::Transcriber) and [`TokenQueue`].
+///
+/// Returns a value (a [`Transcriber`]) implementing [`IntoTokens`] which can be used to build a [`TokenStream`].
 ///
 /// The transcriber does not contain any tokens, but instead owns a closure which appends to a [`TokenQueue`].
 ///
@@ -16,14 +18,37 @@ use crate::{IntoTokens, ToTokens, TokenQueue, for_all_punct_seqs};
 /// [a `macro_rules!` transcriber](https://doc.rust-lang.org/nightly/reference/macros-by-example.html#r-macro.decl.transcription),
 /// using `$` rather than the `#` which `dtolnay/quote` uses:
 /// * `quote! { $foo }` inlines the contents of the variable `foo` into the evaluated token stream.
-///   `foo` must implement [`TryToTokens`](crate::TryToTokens).
+///   `foo` must implement [`IntoTokens`](crate::IntoTokens).
 /// * `quote! { $$ }` evaluates to just `$`.
 /// * unlike in `macro_rules!`, a lone `$` which might introduce ambiguity (e.g. `quote! { $ }`)
 ///   is always rejected.
 ///
+/// # Verbatim Tokens
+///
+/// `quote` exploits compile-time introspection on token values to dramatically speed up transcription.
+/// This is constrains which tokens can be directly quoted somewhat; for instance, the following is rejected.
+///
+/// ```compile_fail
+/// # vermouth::ඞ_declare_test!();
+/// # use vermouth::quote;
+/// quote! { let my_big_num = 100u256; }
+/// # ;
+/// ```
+///
+/// To work around this, use the [`verbatim`](crate::verbatim!) macro.
+///
+/// ```
+/// # vermouth::ඞ_declare_test!();
+/// # use vermouth::{quote, verbatim};
+/// let v = verbatim!(100u256);
+/// quote! { let my_big_num = $v; }
+/// # ;
+/// ```
+///
 /// # Escaping `$$$`
 ///
 /// Notably, while `$$` escapes `$`, the trifold `$$$` is not supported.
+/// (This is merely a consequence of the linear-time `macro_rules!` implementation of `quote`).
 ///
 /// ```compile_fail
 /// # vermouth::ඞ_declare_test!();
@@ -31,10 +56,10 @@ use crate::{IntoTokens, ToTokens, TokenQueue, for_all_punct_seqs};
 /// quote! {
 ///     let bills = stringify!($$$);
 /// }
-/// # .ascribe::<std::convert::Infallible>();
+/// # ;
 /// ```
 ///
-/// Instead, try importing [`Dr`](crate::Dr), which evaluates to `$`.
+/// Instead, try importing [`Dr`], which evaluates to `$`.
 ///
 /// ```
 /// # vermouth::ඞ_declare_test!();
@@ -43,7 +68,7 @@ use crate::{IntoTokens, ToTokens, TokenQueue, for_all_punct_seqs};
 /// quote! {
 ///     let bills = stringify!($Dr $Dr $Dr);
 /// }
-/// # .ascribe::<std::convert::Infallible>();
+/// # ;
 /// ```
 #[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
 #[macro_export]
@@ -59,15 +84,20 @@ macro_rules! quote {
     };
 }
 
-/// A lazily-evaluated sequence of quoted tokens (i.e. what [`quote`](crate::quote!) evaluates to).
+/// A lazily-evaluated sequence of quoted tokens (what [`quote`](crate::quote!) evaluates to).
 ///
-/// See [the `quote` macro](crate::quote!) for more.
+/// See also [`quote`](crate::quote!) and [`TokenQueue`].
+///
+/// [`Transcriber::from_fn`] can be used to manually construct a `Transcriber`, where one is required.
+#[must_use = "`Transcriber`s are lazily evaluated. See `TokenQueue::extend_from`."]
 #[derive(Clone, Copy)]
 pub struct Transcriber<F>(F);
 impl<F> Transcriber<F>
 where
+    // NB: this doesn't stop us passing a `F: Fn(&mut TokenQueue)` since `Fn: FnMut: FnOnce`.
     F: FnOnce(&mut TokenQueue),
 {
+    /// Creates a new transcriber from a closure modifying a [`TokenQueue`].
     pub fn from_fn(f: F) -> Transcriber<F> {
         Transcriber(f)
     }
@@ -126,6 +156,17 @@ impl IntoTokens for Dr {
 }
 
 /// Quotes a single token (either a literal, an ident, or a lifetime) in exactly the format supplied.
+///
+/// This macro expands the range of quotable tokens, at the cost of performance,
+/// when compared to [`quote`](crate::quote!). See [the corresponding documentation](crate::quote!#verbatim-tokens).
+///
+/// For instance, custom numeric suffixes and string prefixes are supported (`100u256` or `w"foobar"`),
+/// but this is something like an order of magnitude slower than directly using `quote`,
+/// since we are not able to perform compile-time introspection on the tokens.
+///
+/// See [the reference](https://doc.rust-lang.org/nightly/reference/tokens.html)
+/// for the precise lexical structure of tokens.
+#[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
 #[macro_export]
 macro_rules! verbatim {
     ($lt:lifetime) => {
@@ -358,86 +399,71 @@ macro_rules! ඞ_macro_quote_punct_seq {
     };
 }
 
-macro_rules! def_quote_tt {
-    (arms = {$($arm:tt)*}, $($p:tt)*) => {
-        #[macro_export]
-        #[doc(hidden)]
-        macro_rules! ඞ_macro_quote_tt_impl_ {
-            $($arm)*
-            $(
-                ($q:ident {$p}) => {
-                    m::push_punct(
-                        $q,
-                        $crate::punct_decompose!(
-                            expand = $crate::ඞ_macro_quote_punct_seq,
-                            fallback = {
-                                core::compile_error!(
-                                    core::concat!(
-                                        "unrecognised punctuation: ",
-                                        core::stringify!($p),
-                                    )
-                                );
-                            },
-                            $p
+/// Quotes a single token.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! ඞ_macro_quote_tt_impl {
+    ($q:ident _) => {};
+    ($q:ident {_}) => {
+        m::push_underscore($q);
+    };
+    ($q:ident {()}) => {
+        m::push_empty_group($q, proc_macro::Delimiter::Parenthesis);
+    };
+    ($q:ident {{}}) => {
+        m::push_empty_group($q, proc_macro::Delimiter::Brace);
+    };
+    ($q:ident {[]}) => {
+        m::push_empty_group($q, proc_macro::Delimiter::Bracket);
+    };
+    ($q:ident {($($t:tt)*)}) => {
+        $crate::TokenQueue::open_substream($q);
+        $crate::ඞ_macro_extend_quote_impl! { $q $($t)* };
+        $crate::TokenQueue::close_substream_and_push_as_group($q, proc_macro::Delimiter::Parenthesis);
+    };
+    ($q:ident {{$($t:tt)*}}) => {
+        $crate::TokenQueue::open_substream($q);
+        $crate::ඞ_macro_extend_quote_impl! { $q $($t)* };
+        $crate::TokenQueue::close_substream_and_push_as_group($q, proc_macro::Delimiter::Brace);
+    };
+    ($q:ident {[$($t:tt)*]}) => {
+        $crate::TokenQueue::open_substream($q);
+        $crate::ඞ_macro_extend_quote_impl! { $q $($t)* };
+        $crate::TokenQueue::close_substream_and_push_as_group($q, proc_macro::Delimiter::Bracket);
+    };
+    ($q:ident {$id:ident}) => {
+        $crate::TokenQueue::push($q, const {
+            m::parse_ident(stringify!($id), $crate::ඞ_macro_capture_source_location!())
+        });
+    };
+    ($q:ident {$lit:literal}) => {
+        m::Spec::new(&$lit).ඞ_lit_quote::<{ m::parse_lit_regime(core::stringify!($lit)) }>(
+            &$lit,
+            core::stringify!($lit),
+            $crate::ඞ_macro_capture_source_location!(),
+            $q
+        );
+    };
+    ($q:ident {$lt:lifetime}) => {
+        $crate::TokenQueue::push($q, const {
+            m::parse_lifetime(stringify!($lt), $crate::ඞ_macro_capture_source_location!())
+        });
+    };
+    ($q:ident {$p:tt}) => {
+        m::push_punct(
+            $q,
+            $crate::punct_decompose!(
+                expand = $crate::ඞ_macro_quote_punct_seq,
+                fallback = {
+                    core::compile_error!(
+                        core::concat!(
+                            "unrecognised token: ",
+                            core::stringify!($p),
                         )
                     );
-                };
-            )*
-        }
-
-        #[doc(hidden)]
-        pub use ඞ_macro_quote_tt_impl_ as ඞ_macro_quote_tt_impl;
+                },
+                $p
+            )
+        );
     };
 }
-
-for_all_punct_seqs!(
-    def_quote_tt,
-    arms = {
-        ($q:ident _) => {};
-        ($q:ident {_}) => {
-            m::push_underscore($q);
-        };
-        ($q:ident ()) => {
-            m::push_empty_group(proc_macro::Delimiter::Parenthesis);
-        };
-        ($q:ident {}) => {
-            m::push_empty_group(proc_macro::Delimiter::Brace);
-        };
-        ($q:ident []) => {
-            m::push_empty_group(proc_macro::Delimiter::Bracket);
-        };
-        ($q:ident {($($t:tt)*)}) => {
-            $crate::TokenQueue::open_group($q, proc_macro::Delimiter::Parenthesis);
-            $crate::ඞ_macro_extend_quote_impl! { $q $($t)* };
-            $crate::TokenQueue::close_and_enqueue_group($q);
-        };
-        ($q:ident {{$($t:tt)*}}) => {
-            $crate::TokenQueue::open_group($q, proc_macro::Delimiter::Brace);
-            $crate::ඞ_macro_extend_quote_impl! { $q $($t)* };
-            $crate::TokenQueue::close_and_enqueue_group($q);
-        };
-        ($q:ident {[$($t:tt)*]}) => {
-            $crate::TokenQueue::open_group($q, proc_macro::Delimiter::Bracket);
-            $crate::ඞ_macro_extend_quote_impl! { $q $($t)* };
-            $crate::TokenQueue::close_and_enqueue_group($q);
-        };
-        ($q:ident {$id:ident}) => {
-            $crate::TokenQueue::push($q, const {
-                m::parse_ident(stringify!($id), $crate::ඞ_macro_capture_source_location!())
-            });
-        };
-        ($q:ident {$lit:literal}) => {
-            m::Spec::new(&$lit).ඞ_lit_quote::<{ m::parse_lit_regime(core::stringify!($lit)) }>(
-                &$lit,
-                core::stringify!($lit),
-                $crate::ඞ_macro_capture_source_location!(),
-                $q
-            );
-        };
-        ($q:ident {$lt:lifetime}) => {
-            $crate::TokenQueue::push($q, const {
-                m::parse_lifetime(stringify!($lt), $crate::ඞ_macro_capture_source_location!())
-            });
-        };
-    }
-);

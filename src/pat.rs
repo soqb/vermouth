@@ -1,3 +1,5 @@
+//! The [`Pattern`] idiom.
+
 use proc_macro::{Delimiter, Group, Punct, Spacing, TokenTree};
 
 use crate::{Expected, Parser, ParserPos, Result};

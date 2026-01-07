@@ -1,5 +1,6 @@
 //! Library-internal CTFE utilities.
 
+/// Returns `true` iff any byte in `bytes` is `p`.
 pub(crate) const fn bytes_any(mut bytes: &[u8], p: u8) -> bool {
     // impl borrows from stdlib's `is_ascii_simple` for optimal compile-time execution time.
     // but searching from the left should be generally faster

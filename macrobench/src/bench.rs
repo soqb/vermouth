@@ -1,4 +1,4 @@
-use std::{hint::black_box, marker::PhantomData, time::Instant};
+use std::{marker::PhantomData, time::Instant};
 
 use smol::channel;
 
@@ -140,7 +140,7 @@ impl MarkEnv {
         self.measure(
             move || {
                 let start = Instant::now();
-                black_box(measure());
+                measure();
                 start.elapsed()
             },
             || bench.warm(),

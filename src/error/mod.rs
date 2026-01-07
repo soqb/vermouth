@@ -1,3 +1,5 @@
+//! Error handling for parsers. See [`Expected`] and [`Diagnostic`].
+
 use core::fmt;
 use std::{borrow::Cow, mem::replace};
 

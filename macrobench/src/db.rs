@@ -198,17 +198,14 @@ impl Db {
         }
     }
 
-    pub fn benches_in(
-        &self,
-        addr: GroupAddr,
-    ) -> impl Iterator<Item = BenchAddr> + ExactSizeIterator {
+    pub fn benches_in(&self, addr: GroupAddr) -> impl ExactSizeIterator<Item = BenchAddr> {
         self.groups[addr.0].benches.iter().copied()
     }
 
     pub fn subgroups_of(
         &self,
         addr: Option<GroupAddr>,
-    ) -> impl Iterator<Item = GroupAddr> + ExactSizeIterator {
+    ) -> impl ExactSizeIterator<Item = GroupAddr> {
         let groups = match addr {
             Some(addr) => &self.groups[addr.0].branches,
             None => &self.trunks,

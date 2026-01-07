@@ -2,7 +2,7 @@
 
 use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream};
 
-use crate::{PushToken, TokenQueue, ctfe};
+use crate::{IntoTokens, PushToken, TokenQueue, ctfe};
 use std::{fmt, str::FromStr};
 
 pub use core;
@@ -65,6 +65,7 @@ impl fmt::Display for SourceLocation {
     }
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! ඞ_macro_capture_source_location {
     () => {
@@ -83,8 +84,8 @@ pub struct Verbatim {
     pub location: SourceLocation,
 }
 
-impl PushToken for Verbatim {
-    fn push_to(self, q: &mut TokenQueue) {
+impl IntoTokens for Verbatim {
+    fn extend_tokens(self, q: &mut TokenQueue) {
         let Verbatim {
             text,
             kind,
@@ -96,6 +97,7 @@ impl PushToken for Verbatim {
         q.push(tt);
     }
 }
+impl PushToken for Verbatim {}
 
 #[inline]
 pub fn push_punct(q: &mut TokenQueue, chars: &[char]) {
@@ -118,12 +120,14 @@ pub const fn parse_lifetime(s: &'static str, location: SourceLocation) -> impl P
     #[derive(Clone, Copy)]
     struct Lifetime<T>(T);
 
-    impl<T: PushToken> PushToken for Lifetime<T> {
-        fn push_to(self, q: &mut TokenQueue) {
+    impl<T: PushToken> IntoTokens for Lifetime<T> {
+        fn extend_tokens(self, q: &mut TokenQueue) {
             q.push(Punct::new('\'', Spacing::Joint));
-            self.0.push_to(q)
+            q.push(self.0);
         }
     }
+
+    impl<T: PushToken> PushToken for Lifetime<T> {}
 
     // NB: no assert_eq bc const.
     let (f, s) = s.split_at(1);
@@ -143,9 +147,9 @@ const fn parse_ident_like(
         Fallback(Verbatim),
     }
 
-    impl PushToken for IdentParse {
+    impl IntoTokens for IdentParse {
         #[inline]
-        fn push_to(self, q: &mut TokenQueue) {
+        fn extend_tokens(self, q: &mut TokenQueue) {
             match self {
                 IdentParse::Raw(s) => q.push(Ident::new_raw(s, Span::call_site())),
                 IdentParse::Notraw(s) => q.push(Ident::new(s, Span::call_site())),
@@ -153,6 +157,7 @@ const fn parse_ident_like(
             }
         }
     }
+    impl PushToken for IdentParse {}
 
     if ctfe::bytes_any(s.as_bytes(), b'#') {
         if let Some((prefix, raw)) = s.split_at_checked(2)

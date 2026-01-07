@@ -58,13 +58,13 @@ impl ProcessFailed {
             ProcessFailed::NonZeroExit(output) => {
                 let mut err = io::stderr().lock();
 
-                write!(err, "job failed with {}\n== STDOUT ==\n", output.status)?;
+                writeln!(err, "job failed with {}\n== STDOUT ==", output.status)?;
                 err.write_all(&output.stdout)?;
-                write!(err, "== STDOUT ==\n")?;
+                writeln!(err, "== STDOUT ==")?;
 
-                write!(err, "\n== STDERR ==\n")?;
+                writeln!(err, "\n== STDERR ==")?;
                 err.write_all(&output.stderr)?;
-                write!(err, "== STDERR ==\n")?;
+                writeln!(err, "== STDERR ==")?;
 
                 err.flush()?;
             }
@@ -155,7 +155,7 @@ impl Target {
         uid: u64,
     ) -> Job<'a> {
         // FIXME: i don't like this..
-        let target_dir: PathBuf = target_base.as_ref().join(&uid.to_string());
+        let target_dir: PathBuf = target_base.as_ref().join(uid.to_string());
         Job {
             spec: self,
             target_dir,

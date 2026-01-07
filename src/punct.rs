@@ -1,3 +1,5 @@
+//! Combinators for handling sequences of [`Punct`](proc_macro::Punct)s (e.g. `&&=`).
+
 /// Decomposes a larger token into a sequence of `char`s.
 ///
 /// This is most useful for facilitating other macro implementations (like [`punct_pat`]).
