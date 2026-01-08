@@ -31,73 +31,20 @@ pub trait IntoTokens: Sized {
     }
 }
 
-/// Methods for converting by-reference into [`TokenQueue`].
-///
-/// See [`IntoTokens`] (the analagous by-value trait) for more.
-pub trait ToTokens {
-    /// Analagous to [`Iterator::size_hint`].
-    fn queue_size_hint_ref(&self) -> (usize, Option<usize>) {
-        (0, None)
-    }
-
-    /// Extends an existing token buffer, copying the contents of a value.
-    fn extend_tokens_ref(&self, q: &mut TokenQueue);
-
-    /// Converts into a [`TokenQueue`] from a reference to a value.
-    fn to_tokens(&self) -> TokenQueue {
-        let mut q = TokenQueue::with_capacity(self.queue_size_hint_ref().0);
-        self.extend_tokens_ref(&mut q);
-        q
-    }
-}
-
-impl<T: ToTokens> IntoTokens for &T {
-    fn extend_tokens(self, q: &mut TokenQueue) {
-        (*self).extend_tokens_ref(q)
-    }
-
+impl<T: IntoTokens + Clone> IntoTokens for &T {
+    #[inline]
     fn queue_size_hint(&self) -> (usize, Option<usize>) {
-        (*self).queue_size_hint_ref()
+        (*self).queue_size_hint()
     }
 
+    #[inline]
+    fn extend_tokens(self, q: &mut TokenQueue) {
+        self.clone().extend_tokens(q);
+    }
+
+    #[inline]
     fn into_tokens(self) -> TokenQueue {
-        let mut q = TokenQueue::with_capacity(self.queue_size_hint_ref().0);
-        self.extend_tokens(&mut q);
-        q
-    }
-}
-
-impl<T: ToTokens> ToTokens for &T {
-    #[inline]
-    fn extend_tokens_ref(&self, q: &mut TokenQueue) {
-        (**self).extend_tokens_ref(q)
-    }
-
-    #[inline]
-    fn queue_size_hint_ref(&self) -> (usize, Option<usize>) {
-        (**self).queue_size_hint_ref()
-    }
-
-    #[inline]
-    fn to_tokens(&self) -> TokenQueue {
-        (**self).to_tokens()
-    }
-}
-
-impl<T: ToTokens> ToTokens for &mut T {
-    #[inline]
-    fn extend_tokens_ref(&self, q: &mut TokenQueue) {
-        (**self).extend_tokens_ref(q)
-    }
-
-    #[inline]
-    fn queue_size_hint_ref(&self) -> (usize, Option<usize>) {
-        (**self).queue_size_hint_ref()
-    }
-
-    #[inline]
-    fn to_tokens(&self) -> TokenQueue {
-        (**self).to_tokens()
+        self.clone().into_tokens()
     }
 }
 
@@ -125,20 +72,6 @@ impl IntoTokens for TokenStream {
     }
 
     fn queue_size_hint(&self) -> (usize, Option<usize>) {
-        (!self.is_empty() as usize, None)
-    }
-}
-
-impl ToTokens for TokenStream {
-    fn extend_tokens_ref(&self, buf: &mut TokenQueue) {
-        buf.push(self.clone());
-    }
-
-    fn to_tokens(&self) -> TokenQueue {
-        self.clone().into()
-    }
-
-    fn queue_size_hint_ref(&self) -> (usize, Option<usize>) {
         (!self.is_empty() as usize, None)
     }
 }

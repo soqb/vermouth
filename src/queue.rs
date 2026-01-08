@@ -345,8 +345,7 @@ impl TokenQueue {
 
     /// Extends an existing [`TokenStream`] with the contents of this queue.
     pub fn extend_stream(mut self, ts: &mut TokenStream) {
-        let mut builder = TokenStreamBuilder::new(self.chunks.drain(..));
-        builder.drain_to::<(), _>(ts);
+        self.chunks.drain(..).collect_by(ts)
     }
 
     /// Enqueues some tokens via [`IntoTokens::extend_tokens`].
@@ -378,7 +377,7 @@ impl TokenQueue {
 
         self.substream_stack_top_ptr = hdr.parent(ptr);
 
-        TokenStreamBuilder::new(drain).drain_to_token_stream()
+        drain.collect_by(())
     }
 
     /// Closes and enqueues the top substream. See [the substream documentation](#substreams).
@@ -419,8 +418,8 @@ fn token_size_hint_for_chunks(chunks: &[Chunk]) -> (usize, Option<usize>) {
             Chunk::PutGroup(_) | Chunk::PutIdent(_) | Chunk::PutLiteral(_) | Chunk::PutPunct(_) => {
                 n += 1
             }
-            // push group is just element shuffling, i.e. entirely immaterial.
-            Chunk::OpenSubstream(_) => (),
+            // substreams are just element shuffling, i.e. entirely immaterial.
+            Chunk::OpenSubstream(_) => break,
         }
     }
 
@@ -478,15 +477,70 @@ impl IntoTokens for TokenQueue {
 /// "Commits" the token queue by value, constructing a [`TokenStream`] from the contents.
 impl From<TokenQueue> for TokenStream {
     fn from(mut q: TokenQueue) -> TokenStream {
-        let mut builder = TokenStreamBuilder::new(q.chunks.drain(..));
-        builder.drain_to_token_stream()
+        q.chunks.drain(..).collect_by(())
     }
 }
 
-trait ChunkBuf: Iterator<Item = Chunk> {
+trait ChunkBuf: Iterator<Item = Chunk> + Sized {
     fn remaining(&self) -> &[Chunk];
+    #[inline]
     fn peek(&self) -> Option<&Chunk> {
         self.remaining().first()
+    }
+    #[inline]
+    fn as_unwrapped_streams(&mut self) -> Option<impl Iterator<Item = TokenStream> + '_> {
+        let possible = self
+            .remaining()
+            .iter()
+            .all(|tc| matches!(tc, Chunk::Embed(_)));
+
+        if !possible {
+            return None;
+        }
+
+        let ts = self.by_ref().filter_map(|chunk| match chunk {
+            Chunk::Embed(ts) => Some(ts),
+            _ => None,
+        });
+
+        Some(ts)
+    }
+
+    #[inline]
+    fn take_as_single_stream(&mut self) -> Option<TokenStream> {
+        let Some(Chunk::Embed(_)) = self.peek() else {
+            return None;
+        };
+
+        let Chunk::Embed(ts) = self.next().unwrap() else {
+            unreachable!();
+        };
+
+        Some(ts)
+    }
+
+    #[inline(never)]
+    fn into_token_stream(self) -> TokenStream {
+        self.collect_by(())
+    }
+
+    #[inline]
+    fn collect_by<B: FromTokens<T>, T>(mut self, t: T) -> B {
+        if let Some(ts) = self.take_as_single_stream() {
+            // if the buf contains just a single steam elem, use that directly.
+            // this is useful for something like `quote! { #[$meta] }`.
+            B::from_lone(t, ts)
+        } else if let Some(tss) = self.as_unwrapped_streams() {
+            // if the buf is all streams, get `proc_macro` to concat them directly, rather than copying ourselves.
+            // this is useful for something like `quote! { $attrs $item $trait_impls }`.
+            B::from_streams(t, tss)
+        } else {
+            let builder = TokenStreamBuilder {
+                chunks: self,
+                ts_queue: None,
+            };
+            B::from_tokens(t, builder)
+        }
     }
 }
 
@@ -511,68 +565,6 @@ impl<S: ChunkBuf> fmt::Debug for TokenStreamBuilder<S> {
     }
 }
 
-impl<S: ChunkBuf> TokenStreamBuilder<S> {
-    fn new(chunks: S) -> TokenStreamBuilder<S> {
-        TokenStreamBuilder {
-            ts_queue: None,
-            chunks,
-        }
-    }
-
-    #[inline(never)]
-    fn drain_to_token_stream(&mut self) -> TokenStream {
-        self.drain_to(())
-    }
-
-    #[inline]
-    fn as_unwrapped_streams(&mut self) -> Option<impl Iterator<Item = TokenStream> + '_> {
-        let possible = self
-            .chunks
-            .remaining()
-            .iter()
-            .all(|tc| matches!(tc, Chunk::Embed(_)));
-
-        if !possible {
-            return None;
-        }
-
-        let ts = self.chunks.by_ref().filter_map(|chunk| match chunk {
-            Chunk::Embed(ts) => Some(ts),
-            _ => None,
-        });
-
-        Some(ts)
-    }
-
-    #[inline]
-    fn take_as_single_stream(&mut self) -> Option<TokenStream> {
-        let Some(Chunk::Embed(_)) = self.chunks.peek() else {
-            return None;
-        };
-
-        let Chunk::Embed(ts) = self.chunks.next().unwrap() else {
-            unreachable!();
-        };
-
-        Some(ts)
-    }
-
-    #[inline]
-    fn drain_to<B: FromTokens<T>, T>(&mut self, t: T) -> B {
-        if let Some(ts) = self.take_as_single_stream() {
-            // if the buf contains just a single steam elem, use that directly.
-            // this is useful for something like `quote! { #[$meta] }`.
-            B::from_lone(t, ts)
-        } else if let Some(tss) = self.as_unwrapped_streams() {
-            // if the buf is all streams, get `proc_macro` to concat them directly, rather than copying ourselves.
-            // this is useful for something like `quote! { $attrs $item $trait_impls }`.
-            B::from_streams(t, tss)
-        } else {
-            B::from_tokens(t, self)
-        }
-    }
-}
-
 trait FromTokens<T> {
     fn from_lone(t: T, ts: TokenStream) -> Self;
     fn from_streams(t: T, tss: impl Iterator<Item = TokenStream>) -> Self;
@@ -580,25 +572,30 @@ trait FromTokens<T> {
 }
 
 impl FromTokens<()> for TokenStream {
+    #[inline]
     fn from_lone(_: (), ts: TokenStream) -> TokenStream {
         ts
     }
+    #[inline]
     fn from_streams(_: (), tss: impl Iterator<Item = TokenStream>) -> TokenStream {
         tss.collect()
     }
+    #[inline]
     fn from_tokens(_: (), tts: impl Iterator<Item = TokenTree>) -> TokenStream {
         tts.collect()
     }
 }
 
 impl<'a> FromTokens<&'a mut TokenStream> for () {
+    #[inline]
     fn from_lone(s: &'a mut TokenStream, ts: TokenStream) {
         s.extend(Some(ts));
     }
+    #[inline]
     fn from_streams(s: &'a mut TokenStream, tss: impl Iterator<Item = TokenStream>) {
         s.extend(tss);
     }
-
+    #[inline]
     fn from_tokens(s: &'a mut TokenStream, tts: impl Iterator<Item = TokenTree>) {
         s.extend(tts);
     }

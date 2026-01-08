@@ -6,7 +6,7 @@ use proc_macro::{Delimiter, Group, Punct, Span, TokenStream, TokenTree};
 
 use crate::{
     Diagnostic, DiagnosticLevel, Eos, Expected, IntoTokens, Parse, Parser, Result, ToSpan,
-    ToTokens, TokenQueue, TokenTreeExt, quote,
+    TokenQueue, TokenTreeExt, quote,
 };
 
 /// An attribute which may be [`cfg`].
@@ -134,12 +134,6 @@ impl<T> Cfgable<T> {
 impl<T: IntoTokens> IntoTokens for Cfgable<T> {
     fn extend_tokens(self, buf: &mut TokenQueue) {
         cfgable_extend_tokens(&self.cfg_attr_metas, self.inner, buf)
-    }
-}
-
-impl<T: ToTokens> ToTokens for Cfgable<T> {
-    fn extend_tokens_ref(&self, buf: &mut TokenQueue) {
-        cfgable_extend_tokens(&self.cfg_attr_metas, &self.inner, buf)
     }
 }
 

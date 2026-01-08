@@ -2,7 +2,7 @@
 
 use proc_macro::{Punct, Spacing, TokenStream};
 
-use crate::{IntoTokens, ToTokens, TokenQueue};
+use crate::{IntoTokens, TokenQueue};
 
 /// Lazy quasi-quoting for Rust source.
 ///
@@ -112,30 +112,12 @@ where
     }
 }
 
-impl<F> ToTokens for Transcriber<F>
-where
-    F: Fn(&mut TokenQueue),
-{
-    fn extend_tokens_ref(&self, q: &mut TokenQueue) {
-        (self.0)(q)
-    }
-}
-
 impl<F> From<Transcriber<F>> for TokenStream
 where
     F: FnOnce(&mut TokenQueue),
 {
     fn from(value: Transcriber<F>) -> TokenStream {
         TokenStream::from(value.into_tokens())
-    }
-}
-
-impl<F> From<&Transcriber<F>> for TokenStream
-where
-    F: Fn(&mut TokenQueue),
-{
-    fn from(value: &Transcriber<F>) -> TokenStream {
-        TokenStream::from(value.to_tokens())
     }
 }
 
