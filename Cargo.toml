@@ -94,6 +94,6 @@ features = ["complete", "internal-document-features"]
 
 [package.metadata.cargo-all-features]
 skip_feature_sets = [
-    ["document-features"],
+    ["internal-document-features"],
     ["proc-macro2", "unstable-diagnostics-backend"],
 ]

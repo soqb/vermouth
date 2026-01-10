@@ -1,6 +1,6 @@
 //! General purpose buffer for token composition. See [`TokenQueue`].
 
-use std::{fmt, num::NonZero};
+use std::fmt;
 
 use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Span, TokenStream, TokenTree};
 
@@ -67,8 +67,10 @@ use crate::IntoTokens;
 /// // q: `let x = (1, 2, 3);`
 /// ```
 ///
-/// It is also possible to factor out substreams idiomatically.
-/// This order of operations has better memory efficiency, but has no practical performance benefit:
+/// It is also possible to factor out substreams onto the stack.
+/// This approach has better heap efficiency but worse stack efficiency,
+/// resulting in no practical performance difference.
+/// It often leads to more readable `quote` invocations.
 ///
 /// ```
 /// # vermouth::ඞ_declare_test!();
@@ -87,8 +89,45 @@ use crate::IntoTokens;
 #[derive(Debug, Clone)]
 pub struct TokenQueue {
     chunks: Vec<Chunk>,
-    /// Index of the top of the group stack.
+    /// Index of the top of the substream stack.
     substream_stack_top_ptr: Option<usize>,
+    span_tracking: SpanTracking,
+}
+
+/// A "shallow stack" managing [span annotations](Transcriber::with_span).
+///
+/// This only holds the outermost span; nested spans are counted but not used.
+#[derive(Debug, Clone, Default)]
+struct SpanTracking {
+    current: Option<Span>,
+    ignored: usize,
+}
+
+impl SpanTracking {
+    const fn none() -> SpanTracking {
+        SpanTracking {
+            current: None,
+            ignored: 0,
+        }
+    }
+
+    fn set(&mut self, next: Span) {
+        match self.current {
+            Some(_) => self.ignored += 1,
+            None => self.current = Some(next),
+        }
+    }
+
+    fn unset(&mut self) {
+        match self.ignored.checked_sub(1) {
+            Some(n) => self.ignored = n,
+            None => self.current = None,
+        }
+    }
+
+    fn current(&self) -> Option<Span> {
+        self.current
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -98,38 +137,32 @@ enum Chunk {
     PutLiteral(Literal),
     PutPunct(Punct),
     Embed(TokenStream),
-    OpenSubstream(SubstreamHeader),
+    OpenSubstream(StackParent),
 }
 
-/// See [the public documentation](TokenQueue#substreams).
-#[derive(Debug, Clone)]
-struct SubstreamHeader {
-    /// If `Some`, this is the offset of this substream relative to the parent within the chunk buffer.
-    /// `NonZero` since no chunk is its own parent.
-    /// If `None`, this is a top-level substream.
-    parent: Option<NonZero<u32>>,
-}
+/// A chunk's reference to its parent.
+///
+/// If zero, this is a top-level element.
+/// If nonzero, this is the offset of this substream relative to the parent within the chunk buffer.
+///
+/// No chunk is its own parent, so offset is never 0.
+#[derive(Debug, Default, Clone, Copy)]
+struct StackParent(u32);
 
-impl SubstreamHeader {
-    pub fn new(addr: usize, parent: Option<usize>) -> SubstreamHeader {
-        let parent = parent.map(|a| NonZero::new(u32::try_from(addr - a).unwrap()).unwrap());
-        SubstreamHeader { parent }
+impl StackParent {
+    #[inline]
+    pub fn new(addr: usize, ptr: Option<usize>) -> StackParent {
+        let n = ptr.map_or(0, |i| u32::try_from(addr - i).unwrap());
+        StackParent(n)
     }
 
-    pub fn parent(&self, addr: usize) -> Option<usize> {
-        self.parent
-            .map(|n| addr - usize::try_from(n.get()).unwrap())
-    }
-}
-
-impl From<TokenTree> for Chunk {
-    fn from(tt: TokenTree) -> Chunk {
-        match tt {
-            TokenTree::Group(a) => Chunk::PutGroup(a),
-            TokenTree::Ident(a) => Chunk::PutIdent(a),
-            TokenTree::Punct(a) => Chunk::PutPunct(a),
-            TokenTree::Literal(a) => Chunk::PutLiteral(a),
+    #[inline]
+    pub fn get(self, addr: usize) -> Option<usize> {
+        if self.0 == 0 {
+            return None;
         }
+
+        Some(addr - usize::try_from(self.0).unwrap())
     }
 }
 
@@ -206,25 +239,62 @@ impl<'a> fmt::Display for DisplayChunks<'a> {
     }
 }
 
-/// Implements `From` over various `TokenTree`-likes for [`Chunk`].
-macro_rules! impl_into_chunk_for_tt {
+/// Utility trait for managing `TokenTree` to `Chunk` conversion.
+///
+/// This is a kind of AOT monomorphisation, which is not done for performance,
+/// but instead purely for the sake of privacy (we don't want to leak [`Chunk`], so we don't put it in trait bounds).
+trait ChunkLike: Clone {
+    fn into_chunk(self) -> Chunk;
+    fn set_span(&mut self, span: Span);
+
+    #[inline]
+    fn into_chunk_with_span(mut self, span: Option<Span>) -> Chunk {
+        if let Some(span) = span {
+            self.set_span(span);
+        }
+
+        self.into_chunk()
+    }
+}
+
+/// See [`ChunkLike`].
+macro_rules! impl_chunklike_for_tt {
     ($($var:ident($ty:ty),)*) => {
         $(
-            impl From<$ty> for Chunk {
+            impl ChunkLike for $ty {
                 #[inline]
-                fn from(tt: $ty) -> Self {
-                    Chunk::$var(tt.into())
+                fn into_chunk(self) -> Chunk {
+                    Chunk::$var(self.into())
+                }
+
+                fn set_span(&mut self, span: Span) {
+                    self.set_span(span);
                 }
             }
         )*
     };
 }
 
-impl_into_chunk_for_tt! {
+impl_chunklike_for_tt! {
     PutPunct(Punct),
     PutIdent(Ident),
     PutLiteral(Literal),
     PutGroup(Group),
+}
+
+impl ChunkLike for TokenTree {
+    fn into_chunk(self) -> Chunk {
+        match self {
+            TokenTree::Group(a) => Chunk::PutGroup(a),
+            TokenTree::Ident(a) => Chunk::PutIdent(a),
+            TokenTree::Punct(a) => Chunk::PutPunct(a),
+            TokenTree::Literal(a) => Chunk::PutLiteral(a),
+        }
+    }
+
+    fn set_span(&mut self, span: Span) {
+        self.set_span(span);
+    }
 }
 
 impl From<TokenStream> for Chunk {
@@ -240,7 +310,7 @@ macro_rules! impl_into_tokens_for_tt {
         $(
             impl IntoTokens for $t {
                 fn extend_tokens(self, q: &mut TokenQueue) {
-                    q.chunks.push(self.into());
+                    q.chunks.push(self.into_chunk_with_span(q.tracked_span()));
                 }
 
                 fn queue_size_hint(&self) -> (usize, Option<usize>) {
@@ -261,7 +331,7 @@ macro_rules! enumerate_into_chunk_implementors {
     ($macro:ident) => {
         // NB: Not `TokenTree`.
         // we want to avoid the footgun of like `q.extend(stream)` when `q.push(stream)` will always be faster.
-        $macro! { TokenStream, Punct, Ident, Literal, Group }
+        $macro! { Punct, Ident, Literal, Group }
     };
 }
 
@@ -279,6 +349,7 @@ macro_rules! impl_push_token_for_into_chunk {
 
 enumerate_into_chunk_implementors!(impl_push_token_for_into_chunk);
 
+impl PushToken for TokenStream {}
 impl PushToken for TokenTree {}
 impl<T: PushToken> PushToken for Option<T> {}
 
@@ -298,6 +369,7 @@ impl TokenQueue {
         TokenQueue {
             chunks: Vec::new(),
             substream_stack_top_ptr: None,
+            span_tracking: SpanTracking::none(),
         }
     }
 
@@ -306,6 +378,7 @@ impl TokenQueue {
         TokenQueue {
             chunks: Vec::with_capacity(n),
             substream_stack_top_ptr: None,
+            span_tracking: SpanTracking::none(),
         }
     }
 
@@ -358,8 +431,8 @@ impl TokenQueue {
     /// Opens a new substream. See [the substream documentation](#substreams).
     pub fn open_substream(&mut self) {
         let ptr = self.chunks.len();
-        let group = SubstreamHeader::new(ptr, self.substream_stack_top_ptr);
-        self.chunks.push(Chunk::OpenSubstream(group));
+        let parent = StackParent::new(ptr, self.substream_stack_top_ptr);
+        self.chunks.push(Chunk::OpenSubstream(parent));
         self.substream_stack_top_ptr = Some(ptr);
     }
 
@@ -371,11 +444,11 @@ impl TokenQueue {
         };
 
         let mut drain = self.chunks.drain(ptr..);
-        let Some(Chunk::OpenSubstream(hdr)) = drain.next() else {
+        let Some(Chunk::OpenSubstream(parent)) = drain.next() else {
             panic!("expected chunk at index {ptr} to be a `OpenSubstream`");
         };
 
-        self.substream_stack_top_ptr = hdr.parent(ptr);
+        self.substream_stack_top_ptr = parent.get(ptr);
 
         drain.collect_by(())
     }
@@ -396,6 +469,62 @@ impl TokenQueue {
     /// Closes and enqueues the top substream. See [the substream documentation](#substreams).
     pub fn close_substream_and_push_as_group(&mut self, delim: Delimiter) {
         self.close_substream_and_push_as_group_with_span(delim, None);
+    }
+
+    /// Annotates the tokens inserted between this call and the corresponding
+    /// [`unset_tracked_span`](TokenQueue::unset_tracked_span) call with the given span.
+    ///
+    /// This method is leveraged by [`Transcriber::with_span`](crate::Transcriber::with_span).
+    ///
+    /// # Nesting
+    ///
+    /// Multiple span-tracking regions may be nested, but only the outermost span will be respected.
+    ///
+    /// ```rust
+    /// # vermouth::ඞ_declare_test!();
+    /// # use vermouth::{quote, TokenQueue};
+    /// # use proc_macro::Span;
+    /// #
+    /// # let a = Span::call_site();
+    /// # #[cfg(any())]
+    /// let a: Span = omitted!();
+    /// # let b = Span::call_site();
+    /// # #[cfg(any())]
+    /// let b: Span = omitted!();
+    ///
+    /// let ref mut q = TokenQueue::new();
+    /// q.set_tracked_span(a);
+    /// q.extend_from(quote! { 1 });
+    /// // span = a           ^^^
+    /// q.set_tracked_span(b);
+    /// q.extend_from(quote! { 2 });
+    /// // span = a           ^^^
+    /// q.unset_tracked_span();
+    /// q.extend_from(quote! { 3 });
+    /// // span = a           ^^^
+    /// q.unset_tracked_span();
+    /// q.extend_from(quote! { 4 });
+    /// // span = none        ^^^
+    /// ```
+    ///
+    /// This behavior might seem counterintuitive,
+    /// but it allows callers to override the spans provided by nested calls.
+    pub fn set_tracked_span(&mut self, span: Span) {
+        self.span_tracking.set(span);
+    }
+
+    /// Closes a span-tracking region.
+    ///
+    /// See [`set_tracked_span`](TokenQueue::set_tracked_span) for more.
+    pub fn unset_tracked_span(&mut self) {
+        self.span_tracking.unset();
+    }
+
+    /// Returns the current span for this span-tracking region.
+    ///
+    /// See [`set_tracked_span`](TokenQueue::set_tracked_span) for more.
+    pub fn tracked_span(&self) -> Option<Span> {
+        self.span_tracking.current()
     }
 
     /// Formats the queue as rust source.
@@ -432,15 +561,17 @@ macro_rules! impl_extend_for_into_chunk {
         $(
             impl Extend<$ty> for TokenQueue {
                 fn extend<T: IntoIterator<Item = $ty>>(&mut self, tcs: T) {
-                    self.chunks.extend(tcs.into_iter().map(Into::<Chunk>::into));
+                    let span = self.tracked_span();
+                    self.chunks.extend(tcs.into_iter().map(move |tc| tc.into_chunk_with_span(span)));
                 }
             }
 
             impl FromIterator<$ty> for TokenQueue {
-                fn from_iter<I: IntoIterator<Item = $ty>>(it: I) -> TokenQueue {
+                fn from_iter<I: IntoIterator<Item = $ty>>(tcs: I) -> TokenQueue {
                     TokenQueue {
-                        chunks: it.into_iter().map(Into::<Chunk>::into).collect(),
-                        substream_stack_top_ptr: None
+                        chunks: tcs.into_iter().map(move |tc| tc.into_chunk()).collect(),
+                        substream_stack_top_ptr: None,
+                        span_tracking: SpanTracking::none(),
                     }
                 }
             }
@@ -455,6 +586,7 @@ impl From<TokenStream> for TokenQueue {
         TokenQueue {
             chunks: vec![Chunk::Embed(ts)],
             substream_stack_top_ptr: None,
+            span_tracking: SpanTracking::none(),
         }
     }
 }
@@ -517,11 +649,6 @@ trait ChunkBuf: Iterator<Item = Chunk> + Sized {
         };
 
         Some(ts)
-    }
-
-    #[inline(never)]
-    fn into_token_stream(self) -> TokenStream {
-        self.collect_by(())
     }
 
     #[inline]

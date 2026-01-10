@@ -22,7 +22,7 @@ pub trait IntoTokens: Sized {
     /// Extends an existing token buffer with the contents of a value.
     fn extend_tokens(self, q: &mut TokenQueue);
 
-    /// Converts into a [`TokenQueue`] from a value.
+    /// Converts by-value to a [`TokenQueue`].
     #[inline]
     fn into_tokens(self) -> TokenQueue {
         let mut q = TokenQueue::with_capacity(self.queue_size_hint().0);

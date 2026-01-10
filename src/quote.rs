@@ -1,6 +1,6 @@
 //! See [`quote`](crate::quote!).
 
-use proc_macro::{Punct, Spacing, TokenStream};
+use proc_macro::{Punct, Spacing, Span, TokenStream};
 
 use crate::{IntoTokens, TokenQueue};
 
@@ -78,7 +78,7 @@ macro_rules! quote {
             |_q| {
                 #[allow(unused_imports)]
                 use $crate::{IntoTokens as _, ඞ_macro_exports::{self as m, proc_macro, core, Spec, SpecLiteralQuote as _}};
-                $crate::ඞ_macro_extend_quote_impl! { _q $($t)* };
+                $crate::ඞ_macro_quote_extend_impl! { _q $($t)* };
             },
         )
     };
@@ -91,7 +91,10 @@ macro_rules! quote {
 /// [`Transcriber::from_fn`] can be used to manually construct a `Transcriber`, where one is required.
 #[must_use = "`Transcriber`s are lazily evaluated. See `TokenQueue::extend_from`."]
 #[derive(Clone, Copy)]
-pub struct Transcriber<F>(F);
+pub struct Transcriber<F> {
+    f: F,
+    span: Option<Span>,
+}
 impl<F> Transcriber<F>
 where
     // NB: this doesn't stop us passing a `F: Fn(&mut TokenQueue)` since `Fn: FnMut: FnOnce`.
@@ -99,7 +102,33 @@ where
 {
     /// Creates a new transcriber from a closure modifying a [`TokenQueue`].
     pub fn from_fn(f: F) -> Transcriber<F> {
-        Transcriber(f)
+        Transcriber { f, span: None }
+    }
+
+    /// Unwraps the closure backing this transcriber.
+    pub fn into_fn(self) -> F {
+        self.f
+    }
+
+    /// Annotates all tokens within the transcriber with the given span.
+    ///
+    /// ```rust
+    /// # vermouth::ඞ_declare_test!();
+    /// # use vermouth::{quote, TokenQueue};
+    /// # use proc_macro::Span;
+    /// #
+    /// # let span = Span::call_site();
+    /// # #[cfg(any())]
+    /// let span: Span = omitted!();
+    ///
+    /// let ref mut q = TokenQueue::new();
+    /// q.extend_from(quote! { foo / bar }.with_span(span));
+    /// ```
+    ///
+    /// See [`TokenQueue::set_tracked_span`] for more.
+    pub fn with_span(mut self, span: Span) -> Transcriber<F> {
+        self.span = Some(span);
+        self
     }
 }
 
@@ -108,7 +137,16 @@ where
     F: FnOnce(&mut TokenQueue),
 {
     fn extend_tokens(self, q: &mut TokenQueue) {
-        (self.0)(q)
+        if let Some(span) = self.span {
+            q.set_tracked_span(span);
+        }
+
+        (self.f)(q);
+
+        #[allow(clippy::redundant_pattern_matching, reason = "dude. lay off it.")]
+        if let Some(_) = self.span {
+            q.unset_tracked_span();
+        }
     }
 }
 
@@ -176,17 +214,7 @@ macro_rules! verbatim {
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! ඞ_macro_inline_quote_impl {
-    ($q:ident $($t:tt)*) => {
-        let mut $q = $crate::TokenQueue::new();
-        let _q = &mut $q;
-        $crate::ඞ_macro_extend_quote_impl! { _q $($t)* };
-    };
-}
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! ඞ_macro_extend_quote_impl {
+macro_rules! ඞ_macro_quote_extend_impl {
     ($q:ident) => {};
     ($q:ident $) => {
         core::compile_error!("invalid quasi-quoting syntax: `$` cannot trail the input.");
@@ -197,7 +225,7 @@ macro_rules! ඞ_macro_extend_quote_impl {
     ($q:ident $($t:tt)*) => {
         // #[cfg(not(debug_assertions))]
         // $crate::TokenQueue::reserve($q, $crate::ඞ_macro_quote_reserve_size! { $($t)* });
-        $crate::ඞ_macro_quote_matrixed! {
+        $crate::ඞ_macro_quote_parse_matrix! {
             ඞ_macro_quote_emit
             $q
             { _ _ _ _ _ $({$t})* }
@@ -250,7 +278,7 @@ macro_rules! ඞ_macro_quote_reserve_size {
     }};
     ($($t:tt)*) => {{
         let mut v = 0usize;
-        $crate::ඞ_macro_quote_matrixed! {
+        $crate::ඞ_macro_quote_parse_matrix! {
             ඞ_macro_quote_reserve_size_emit
             v
             { _ _ _ _ _ $({$t})* }
@@ -303,58 +331,54 @@ macro_rules! ඞ_macro_quote_reserve_size_emit {
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! ඞ_macro_quote_parse_windowed {
+macro_rules! ඞ_macro_quote_parse_window {
     ($m:ident $cx:tt {$} {$} {$} $_3:tt $_4:tt $_5:tt) => {
         $crate::$m! { triple_at $cx }
     };
     ($m:ident $cx:tt {$} {$} $a:tt $b:tt $c:tt $d:tt) => {
         $crate::$m! { tt $cx {$} }
-        $crate::ඞ_macro_quote_parse_windowed! { $m $cx _ _ _ _ _ $a }
-        $crate::ඞ_macro_quote_parse_windowed! { $m $cx _ _ _ _ $a $b }
-        $crate::ඞ_macro_quote_parse_windowed! { $m $cx _ _ _ $a $b $c }
-        $crate::ඞ_macro_quote_parse_windowed! { $m $cx _ _ $a $b $c $d }
+        $crate::ඞ_macro_quote_parse_window! { $m $cx _ _ _ _ _ $a }
+        $crate::ඞ_macro_quote_parse_window! { $m $cx _ _ _ _ $a $b }
+        $crate::ඞ_macro_quote_parse_window! { $m $cx _ _ _ $a $b $c }
+        $crate::ඞ_macro_quote_parse_window! { $m $cx _ _ $a $b $c $d }
     };
     ($m:ident $cx:tt $_0:tt {$} {$n:ident} {($($t:tt)*)} {*} $a:tt) => {
         $crate::$m! { rep $cx $n $($t)* }
-        $crate::ඞ_macro_quote_parse_windowed! { $q _ _ _ _ _ $a }
+        $crate::ඞ_macro_quote_parse_window! { $q _ _ _ _ _ $a }
     };
     ($m:ident $cx:tt $_0:tt {$} {$n:ident} {($($t:tt)*)} {p:tt} {*}) => {
         $crate::$m! { seprep $cx $n p $($t)* }
     };
     ($m:ident $cx:tt $_0:tt {$} {$n:ident} $a:tt $b:tt $c:tt) => {
         $crate::$m! { embed $cx $n };
-        $crate::ඞ_macro_quote_parse_windowed! { $m $cx _ _ _ _ _ $a }
-        $crate::ඞ_macro_quote_parse_windowed! { $m $cx _ _ _ _ $a $b }
-        $crate::ඞ_macro_quote_parse_windowed! { $m $cx _ _ _ $a $b $c }
+        $crate::ඞ_macro_quote_parse_window! { $m $cx _ _ _ _ _ $a }
+        $crate::ඞ_macro_quote_parse_window! { $m $cx _ _ _ _ $a $b }
+        $crate::ඞ_macro_quote_parse_window! { $m $cx _ _ _ $a $b $c }
     };
     ($m:ident $cx:tt $_0:tt {$} {$} $a:tt $b:tt $c:tt) => {};
     ($m:ident $cx:tt $_0:tt {$} $t:tt $_3:tt $_4:tt $_5:tt) => {
         $crate::$m! { reserved $cx $t }
     };
     ($m:ident $cx:tt $a:tt $b:tt {$} $_3:tt $_4:tt $_5:tt) => {
-        $crate::ඞ_macro_quote_parse_windowed! { $m $cx $a $b _ _ _ _ }
+        $crate::ඞ_macro_quote_parse_window! { $m $cx $a $b _ _ _ _ }
     };
     ($m:ident $cx:tt $a:tt $b:tt $c:tt {$} $_4:tt $_5:tt) => {
-        $crate::ඞ_macro_quote_parse_windowed! { $m $cx $a $b $c _ _ _ }
+        $crate::ඞ_macro_quote_parse_window! { $m $cx $a $b $c _ _ _ }
     };
     ($m:ident $cx:tt $a:tt $b:tt $c:tt $d:tt {$} $_5:tt) => {
-        $crate::ඞ_macro_quote_parse_windowed! { $m $cx $a $b $c $d _ _ }
+        $crate::ඞ_macro_quote_parse_window! { $m $cx $a $b $c $d _ _ }
     };
     ($m:ident $cx:tt $a:tt $b:tt $c:tt $d:tt $e:tt {$}) => {
-        $crate::ඞ_macro_quote_parse_windowed! { $m $cx $a $b $c $d $e _ }
+        $crate::ඞ_macro_quote_parse_window! { $m $cx $a $b $c $d $e _ }
     };
     ($m:ident $cx:tt $_0:tt $_1:tt $_2:tt $_3:tt $_4:tt $t:tt) => {
         $crate::$m! { tt $cx $t }
     };
 }
 
-// #[doc(hidden)]
-// #[macro_export]
-// macro_rules! ඞ_macro_quote_window6 {}
-
 #[doc(hidden)]
 #[macro_export]
-macro_rules! ඞ_macro_quote_matrixed {
+macro_rules! ඞ_macro_quote_parse_matrix {
     (
         $m:ident
         $cx:tt
@@ -366,7 +390,7 @@ macro_rules! ඞ_macro_quote_matrixed {
         { $($f:tt)* }
     ) => {
         $(
-            $crate::ඞ_macro_quote_parse_windowed! { $m $cx $a $b $c $d $e $f }
+            $crate::ඞ_macro_quote_parse_window! { $m $cx $a $b $c $d $e $f }
         )*
     };
 }
@@ -400,17 +424,17 @@ macro_rules! ඞ_macro_quote_tt_impl {
     };
     ($q:ident {($($t:tt)*)}) => {
         $crate::TokenQueue::open_substream($q);
-        $crate::ඞ_macro_extend_quote_impl! { $q $($t)* };
+        $crate::ඞ_macro_quote_extend_impl! { $q $($t)* };
         $crate::TokenQueue::close_substream_and_push_as_group($q, proc_macro::Delimiter::Parenthesis);
     };
     ($q:ident {{$($t:tt)*}}) => {
         $crate::TokenQueue::open_substream($q);
-        $crate::ඞ_macro_extend_quote_impl! { $q $($t)* };
+        $crate::ඞ_macro_quote_extend_impl! { $q $($t)* };
         $crate::TokenQueue::close_substream_and_push_as_group($q, proc_macro::Delimiter::Brace);
     };
     ($q:ident {[$($t:tt)*]}) => {
         $crate::TokenQueue::open_substream($q);
-        $crate::ඞ_macro_extend_quote_impl! { $q $($t)* };
+        $crate::ඞ_macro_quote_extend_impl! { $q $($t)* };
         $crate::TokenQueue::close_substream_and_push_as_group($q, proc_macro::Delimiter::Bracket);
     };
     ($q:ident {$id:ident}) => {
