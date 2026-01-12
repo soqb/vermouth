@@ -234,11 +234,16 @@ impl IntoTokens for Dr {
     }
 }
 
-/// Quotes a single token (either a literal, an ident, or a lifetime) in exactly the format supplied.
+/// Quotes a single token (either a literal, an identifier, or a lifetime) in exactly the format supplied.
 ///
 /// This macro expands the range of quotable tokens, at the cost of performance,
 /// when compared to [`quote`].
 /// See [the corresponding documentation](quote#token-fidelity-and-verbatim-tokens).
+///
+/// Note that we explicitly only support invoking `verbatim` on a single token at a time.
+/// This is due to the unspecified nature of interactions between
+/// [`TokenStream::from_str`](TokenStream#impl-FromStr-for-TokenStream) and [the `stringify` macro](stringify!).
+/// We choose to marginalize the scope of possible breakage at the slight cost of expressivity.
 #[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
 #[macro_export]
 macro_rules! verbatim {

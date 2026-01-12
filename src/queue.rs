@@ -130,6 +130,9 @@ impl SpanTracking {
     }
 }
 
+/// An element within a [`TokenQueue`].
+///
+/// Note that we inline [`TokenTree`] since it shaves 4 bytes of the size of this enum on 64-bit targets.
 #[derive(Debug, Clone)]
 enum Chunk {
     PutGroup(Group),
@@ -240,9 +243,6 @@ impl<'a> fmt::Display for DisplayChunks<'a> {
 }
 
 /// Utility trait for managing `TokenTree` to `Chunk` conversion.
-///
-/// This is a kind of AOT monomorphisation, which is not done for performance,
-/// but instead purely for the sake of privacy (we don't want to leak [`Chunk`], so we don't put it in trait bounds).
 trait ChunkLike: Clone {
     fn into_chunk(self) -> Chunk;
     fn set_span(&mut self, span: Span);
@@ -267,6 +267,7 @@ macro_rules! impl_chunklike_for_tt {
                     Chunk::$var(self.into())
                 }
 
+                #[inline]
                 fn set_span(&mut self, span: Span) {
                     self.set_span(span);
                 }
@@ -326,7 +327,8 @@ impl_into_tokens_for_tt! { TokenTree, Punct, Ident, Group, Literal }
 /// Invokes the given macro with all of the implementors of `Into<Chunk>`.
 ///
 /// This is a kind of AOT monomorphisation, which is not done for performance,
-/// but instead purely for the sake of privacy (we don't want to leak [`Chunk`], so we don't put it in trait bounds).
+/// but instead purely for the sake of privacy (we don't want to leak [`Chunk`] or [`ChunkLike`],
+/// so we don't put it in trait bounds).
 macro_rules! enumerate_into_chunk_implementors {
     ($macro:ident) => {
         // NB: Not `TokenTree`.
@@ -382,16 +384,23 @@ impl TokenQueue {
         }
     }
 
+    /// Returns the command count of this token queue.
+    ///
+    /// See [`IntoTokens::queue_size_hint`] for an explanation of this value.
     #[must_use]
     pub fn len(&self) -> usize {
         self.chunks.len()
     }
 
+    /// Returns `true` if the queue contains no commands.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.chunks.is_empty()
     }
 
+    /// Returns an estimation of the number of [`TokenTree`]s this queue represents.
+    ///
+    /// Note that this is not the same as [`IntoTokens::queue_size_hint`] or [`TokenQueue::len`].
     #[must_use]
     pub fn token_size_hint(&self) -> (usize, Option<usize>) {
         token_size_hint_for_chunks(&self.chunks)

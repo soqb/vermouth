@@ -43,8 +43,9 @@ use crate::{Expected, Parser, ParserPos, Result};
 ///     }
 /// }
 ///
-/// let ref mut cx: Parser;
 /// # let ref mut cx = Parser::new(TokenStream::new(), Span::call_site());
+/// # #[cfg(any())]
+/// let ref mut cx: Parser = omitted!();
 ///
 /// // For `Pattern::eat` and `Parser::eat` we have to specify
 /// // the type of the arguments to help the compiler infer the type being parsed.
@@ -64,6 +65,7 @@ use crate::{Expected, Parser, ParserPos, Result};
 /// It is the user's choice to implement `Pattern` or `Parse`
 /// and often there is nothing stopping both from being implemented.
 pub trait Pattern {
+    /// The result of parsing with this pattern.
     type Output;
 
     /// Uses the arguments stored in `self` to parse a value from a [`Parser`].
