@@ -1,5 +1,5 @@
 [package]
-name = "upstream"
+name = "much-nesting-upstream"
 edition = "2024"
 
 [lib]
@@ -11,5 +11,6 @@ vermouth = { path = "../../../../", default-features = false, features = ["quote
 quote = { version = "1.0.42", optional = true }
 
 [features]
+default = ["vermouth"]
 vermouth = ["dep:vermouth"]
 dtolnay = ["dep:quote"]

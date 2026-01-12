@@ -12,7 +12,6 @@ const ITERS: usize = 2usize.pow(14);
 #[proc_macro]
 pub fn feel_the_burn(_ts: TokenStream) -> TokenStream {
     for _ in 0..ITERS {
-        let n = std::time::Instant::now();
         let tokens = quote! {
             fn foo() -> Result<(), ()> {
                 let x = Some(5);

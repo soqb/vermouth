@@ -895,6 +895,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "many-literals"
+version = "0.0.0"
+dependencies = [
+ "many-literals-upstream",
+]
+
+[[package]]
+name = "many-literals-upstream"
+version = "0.0.0"
+dependencies = [
+ "quote",
+ "vermouth",
+]
+
+[[package]]
+name = "many-tokens"
+version = "0.0.0"
+dependencies = [
+ "many-tokens-upstream",
+]
+
+[[package]]
+name = "many-tokens-upstream"
+version = "0.0.0"
+dependencies = [
+ "quote",
+ "vermouth",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -931,6 +961,21 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys",
+]
+
+[[package]]
+name = "much-nesting"
+version = "0.0.0"
+dependencies = [
+ "much-nesting-upstream",
+]
+
+[[package]]
+name = "much-nesting-upstream"
+version = "0.0.0"
+dependencies = [
+ "quote",
+ "vermouth",
 ]
 
 [[package]]

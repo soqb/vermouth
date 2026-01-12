@@ -1,12 +1,9 @@
-[workspace]
-members = ["upstream"]
-
 [package]
 name = "much-nesting"
 edition = "2024"
 
 [dependencies]
-upstream = { path = "upstream" }
+upstream = { path = "upstream", package = "much-nesting-upstream", default-features = false }
 
 [features]
 vermouth = ["upstream/vermouth"]

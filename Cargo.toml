@@ -19,9 +19,8 @@ members = [
     "examples/toy/macros",
     "macrobench",
     "benches",
-]
-exclude = [
     "benches/compile-fodder/*",
+    "benches/compile-fodder/*/upstream",
 ]
 
 [workspace.dependencies]

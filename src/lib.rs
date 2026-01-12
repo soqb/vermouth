@@ -19,12 +19,21 @@
 //! _Fortification against [sin][`syn`]._
 //! A new kind of parser for procedural macros.
 //!
+//! This crate aims to be a (not-quite) drop-in replacement for
+//! [David Tolnay]'s [`proc-macro2`] and [`quote`] crates,
+//! and an opinionated alternative to [`syn`].
+//!
 //! Opposing [`syn`],
 //! this crate is designed around the philosophy that malformed input
 //! should be handled gracefully by procedural macros.
 //!
-//! See the methods on the [`Parser`] type for structural documentation.
+//! See [our `quote` macro](crate::quote!) and the [`TokenQueue`] type
+//! for stream-building operations.
+//! See the [`Parser`] type for structural documentation on parsing.
 //!
+//! [David Tolnay]: https://github.com/dtolnay/
+//! [`proc-macro2`]: https://crates.io/crates/proc-macro2
+//! [`quote`]: https://crates.io/crates/quote
 //! [`syn`]: https://crates.io/crates/syn
 //!
 #![cfg_attr(

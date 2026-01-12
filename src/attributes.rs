@@ -260,6 +260,7 @@ where
     Fo: FnMut(&mut Parser, A) -> Result<O>,
     Fi: FnMut(&mut Parser, A) -> Result<I>,
 {
+    /// Lazily parse [`Attribute`]s with distinct inner and outer parser functions.
     pub fn parse_many_separately(
         cx: &'a mut Parser,
         args: A,
@@ -276,7 +277,9 @@ where
     }
 }
 
-// without TAIT, not possible to make this an instance method.
+// FIXME: without TAIT, not possible to make this an instance method.
+//   when that comes, do that instead.
+/// Lazily parse [`Attribute`]s with distinct inner and outer [parsers](Parser).
 pub fn parse_many_attributes_with<'a, O, I>(
     cx: &'a mut Parser,
     args: O::Args<'a>,
@@ -296,6 +299,7 @@ where
     Attrs::parse_many_separately(cx, args, O::parse_with, I::parse_with)
 }
 
+/// Lazily parse [`Attribute`]s with distinct inner and outer [parsers](Parser)s will defaultable arguments.
 pub fn parse_many_attributes<'a, O, I>(
     cx: &'a mut Parser,
 ) -> Attrs<
@@ -314,19 +318,6 @@ where
     parse_many_attributes_with(cx, O::Args::default())
 }
 
-// type F<A, T> = fn(&mut Parser, A) -> Result<T>;
-// impl<'a, O, I, A: Clone> Attrs<'a, O, I, A, F<A, O>, F<A, I>>
-// where
-//     O: for<'b> Parse<Args<'b> = A>,
-//     I: for<'b> Parse<Args<'b> = A>,
-// {
-//     // pub fn parse_many_with(
-//     //     cx: &'a mut Parser,
-//     //     args: A,
-//     // ) -> Attrs<'a, O, I, A, F<A, O>, F<A, I>> {
-//     //     let f: F<A, O> = O::parse_with(parser, args)
-//     // }
-// }
 impl<'a, O, I, A: Clone, Fo, Fi> Iterator for Attrs<'a, O, I, A, Fo, Fi>
 where
     Fo: FnMut(&mut Parser, A) -> Result<O>,
@@ -346,7 +337,9 @@ where
     }
 }
 
+/// A trait extending [`Iterator`]s over [`Attributes`].
 pub trait AttrIterExt<O, I>: Iterator<Item = Attribute<O, I>> + Sized {
+    /// Analagous to [`Iterator::fold`], but separating inner and outer attributes.
     fn fold_separately<Bo, Bi>(
         self,
         mut fold_outer: impl FnMut(Bo, O) -> Bo,
@@ -363,6 +356,9 @@ pub trait AttrIterExt<O, I>: Iterator<Item = Attribute<O, I>> + Sized {
         (outer_init, inner_init)
     }
 
+    /// Lazily pulls inner attributes out of the iterator with a closure.
+    ///
+    /// The returned iterator yields unwrapped outer attribute values.
     fn extracting_inner_with(self, mut extract_inner: impl FnMut(I)) -> impl Iterator<Item = O> {
         self.filter_map(move |attr| match attr {
             Attribute::Outer { contents } => Some(contents),
@@ -372,6 +368,10 @@ pub trait AttrIterExt<O, I>: Iterator<Item = Attribute<O, I>> + Sized {
             }
         })
     }
+
+    /// Lazily pulls inner attributes out of the iterator with a closure.
+    ///
+    /// The returned iterator yields unwrapped outer attribute values.
     fn extracting_outer_with(self, mut extract_outer: impl FnMut(O)) -> impl Iterator<Item = I> {
         self.filter_map(move |attr| match attr {
             Attribute::Inner { contents, .. } => Some(contents),
@@ -382,9 +382,16 @@ pub trait AttrIterExt<O, I>: Iterator<Item = Attribute<O, I>> + Sized {
         })
     }
 
+    /// Lazily extends a container with inner attributes from the iterator.
+    ///
+    /// The returned iterator yields unwrapped outer attribute values.
     fn extracting_inner_to(self, inner: &mut impl Extend<I>) -> impl Iterator<Item = O> {
         self.extracting_inner_with(move |i| inner.extend([i]))
     }
+
+    /// Lazily extends a container with inner attributes from the iterator.
+    ///
+    /// The returned iterator yields unwrapped outer attribute values.
     fn extracting_outer_to(self, outer: &mut impl Extend<O>) -> impl Iterator<Item = I> {
         self.extracting_outer_with(move |o| outer.extend([o]))
     }
@@ -398,49 +405,3 @@ where
     Fi: FnMut(&mut Parser, A) -> Result<I>,
 {
 }
-
-// pub fn parse_and_fold_attributes_separately<O, I, A: Clone, Bo, Bi>(
-//     cx: &mut Parser,
-//     args: A,
-//     mut parse_outer: impl FnMut(&mut Parser, A) -> Result<O>,
-//     mut parse_inner: impl FnMut(&mut Parser, A) -> Result<I>,
-//     mut fold_outer: impl FnMut(Bo, O) -> Bo,
-//     mut fold_inner: impl FnMut(Bi, I) -> Bi,
-//     mut outer_init: Bo,
-//     mut inner_init: Bi,
-// ) -> (Bo, Bi) {
-//     loop {
-//         match Attribute::parse_separately(cx, args.clone(), &mut parse_outer, &mut parse_inner) {
-//             Ok(Attribute::Outer { contents }) => outer_init = fold_outer(outer_init, contents),
-//             Ok(Attribute::Inner { contents, bang: _ }) => {
-//                 inner_init = fold_inner(inner_init, contents)
-//             }
-//             Err(_) => return (outer_init, inner_init),
-//         }
-//     }
-// }
-
-// pub fn parse_and_collect_attributes_with<O, I, Co, Ci>(
-//     cx: &mut Parser,
-//     args: O::Args<'_>,
-// ) -> (Co, Ci)
-// where
-//     Co: Default + Extend<O>,
-//     Ci: Default + Extend<I>,
-//     O: Parse,
-//     I: for<'a> Parse<Args<'a> = O::Args<'a>>,
-//     for<'a> O::Args<'a>: Clone,
-// {
-//     parse_and_fold_attributes_separately(cx, args, O::parse_with, I::parse_with)
-// }
-
-// pub fn parse_and_collect_attributes<O, I, Co, Ci>(cx: &mut Parser) -> (Co, Ci)
-// where
-//     Co: Default + Extend<O>,
-//     Ci: Default + Extend<I>,
-//     O: Parse,
-//     I: for<'a> Parse<Args<'a> = O::Args<'a>>,
-//     for<'a> O::Args<'a>: Default + Clone,
-// {
-//     parse_and_collect_attributes_with(cx, O::Args::default())
-// }

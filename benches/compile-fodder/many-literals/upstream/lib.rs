@@ -6,6 +6,7 @@ use quote::quote;
 #[cfg(feature = "vermouth")]
 use vermouth::quote;
 
+#[allow(dead_code)]
 const LEN: usize = 256;
 const ITERS: usize = 2usize.pow(14);
 
