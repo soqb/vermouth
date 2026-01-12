@@ -1,4 +1,4 @@
-//! The [`ToTokens`] and [`IntoTokens`] traits for idiomatic tokenization.
+//! The [`IntoTokens`] traits for idiomatic tokenization.
 
 use std::convert::Infallible;
 

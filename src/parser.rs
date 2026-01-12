@@ -449,8 +449,10 @@ impl Parser {
     /// # Reporting
     ///
     /// **NB:** This method has the same "unforgiving" effects on error reporting as [`Parser::restore`].
+    #[track_caller]
     pub fn gag(&mut self, n: usize) {
         let idx = self.stream.idx().seek_back(n).unwrap_or_else(|| {
+            // NB: track caller because it's not our fault if this panic procs.
             panic!("tried to `Parser::gag` to before the beginning of the parser's stream")
         });
         self.stream.seek_to(idx);

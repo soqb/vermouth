@@ -1,4 +1,4 @@
-//! Combinators for handling sequences of [`Punct`](proc_macro::Punct)s (e.g. `&&=`).
+//! Combinators for handling sequences of [`Punct`](proc_macro::Punct)s (e.g. `&&` or `..=`).
 
 /// Decomposes a larger token into a sequence of `char`s.
 ///

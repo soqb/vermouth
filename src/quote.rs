@@ -19,13 +19,16 @@ use crate::{IntoTokens, TokenQueue};
 /// # Interpolation
 ///
 /// The rules for interpolation behave similarly to
-/// [a `macro_rules!` transcriber](https://doc.rust-lang.org/nightly/reference/macros-by-example.html#r-macro.decl.transcription),
-/// using `$` rather than the `#` which `dtolnay/quote` uses:
+/// [a `macro_rules!` transcriber](https://doc.rust-lang.org/nightly/reference/macros-by-example.html#r-macro.decl.transcription):
 /// * `quote! { $foo }` inlines the contents of the variable `foo` into the evaluated token stream.
 ///   `foo` must implement [`IntoTokens`].
 /// * `quote! { $$ }` evaluates to just `$`.
 /// * unlike in `macro_rules!`, a lone `$` which might introduce ambiguity (e.g. `quote! { $ }`)
 ///   is always rejected.
+///
+/// This should be familiar if you have used
+/// [the `quote` macro from David Tolnay's `quote` crate](https://docs.rs/quote/latest/quote/macro.quote.html),
+/// but be aware that we use `$` rather than `#`, as our escape token.
 ///
 /// # Token Fidelity and Verbatim Tokens
 ///

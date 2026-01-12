@@ -31,6 +31,13 @@
 //! for stream-building operations.
 //! See the [`Parser`] type for structural documentation on parsing.
 //!
+//! <div class="warning">
+//!
+//! The design of this crate is still in flux.
+//! Expect frequent breaking changes and temporary (🤞) API inconsistencies.
+//!
+//! </div>
+//!
 //! [David Tolnay]: https://github.com/dtolnay/
 //! [`proc-macro2`]: https://crates.io/crates/proc-macro2
 //! [`quote`]: https://crates.io/crates/quote
@@ -54,21 +61,6 @@ compile_error!(
     due to limitations in the implementation of `proc-macro2`"
 );
 
-// /// A hygiene-exploiting hack to allow macros to be exported at non-root paths.
-// macro_rules! export_macro {
-//     (#[unused_name($unused:ident)] $(#[$attr:meta])* macro_rules! $name:ident { $($t:tt)* }) => {
-//         $(#[$attr])*
-//         #[macro_export]
-//         #[doc(hidden)]
-//         macro_rules! $unused {
-//             $($t)*
-//         }
-
-//         #[doc(inline)]
-//         pub use $unused as $name;
-//     };
-// }
-
 /// Imports either
 #[cfg_attr(not(feature = "proc-macro2"), doc = "[`proc_macro`] or `proc_macro2`")]
 #[cfg_attr(
@@ -82,15 +74,8 @@ compile_error!(
 #[macro_export]
 macro_rules! ඞ_declare_test {
     () => {
-        // // this... is unfortunate.
-        // // we don't want to enable `cfg(feature = "proc-macro2")` for r-a,
-        // // but we also don't want to disable `cfg(test)` and thus,
-        // // we enable *another* feature to silence the error.
-        // #[cfg(not(any(feature = "proc-macro2", feature = "rust-analyzer-hack")))]
-        // compile_error!(
-        //     "`vermouth` tests must be run with the `proc-macro2` feature.\n\
-        //     `proc-macro` doesn't support execution outside the rustc harness"
-        // );
+        // FIXME: i want a compile error when this is used without `-Fproc-macro2`
+        //   but not to proc in r-a. somebody help :(((.
 
         // even if we just spat out a compile error,
         // we still import a (non-functional) crate

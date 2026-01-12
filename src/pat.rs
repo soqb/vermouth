@@ -158,7 +158,7 @@ macro_rules! ඞ_punct_pat_def {
     };
 }
 
-/// Transforms a sequence of punctuation (like `&&` or `..=`) into a [`PunctPat`].
+/// Transforms a sequence of punctuation (e.g. `&&` or `..=`) into a [`PunctPat`].
 ///
 /// The subsequent `PunctPat` implements [`Pattern`],
 /// and so can be used with methods like [`Parser::eat`].

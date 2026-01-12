@@ -438,14 +438,19 @@ impl TokenQueue {
 
     /// Closes and returns the top substream. See [the substream documentation](#substreams).
     #[must_use = "`close_substream` returns a `TokenStream` and does not enqueue anything."]
+    #[track_caller]
     pub fn close_substream(&mut self) -> TokenStream {
         let Some(ptr) = self.substream_stack_top_ptr else {
+            // NB: track caller because it's not our fault if this panic procs.
             panic!("{POP_NO_PUSH_MSG}")
         };
 
         let mut drain = self.chunks.drain(ptr..);
         let Some(Chunk::OpenSubstream(parent)) = drain.next() else {
-            panic!("expected chunk at index {ptr} to be a `OpenSubstream`");
+            // NB: it is our fault if this one procs, but uhh.. it shouldn't.
+            unreachable!(
+                "`close_substream`: expected chunk at index {ptr} to be a `OpenSubstream`"
+            );
         };
 
         self.substream_stack_top_ptr = parent.get(ptr);
