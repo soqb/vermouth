@@ -9,7 +9,7 @@ use crate::{
 
 use super::{
     ReparseKind,
-    lit::{DelayedLiteral, LitContents},
+    lit::{LazyLiteral, LitContents},
 };
 
 pub struct Spec<T>(PhantomData<T>);
@@ -48,7 +48,7 @@ impl<T: LitContents> SpecLiteralQuote for Spec<T> {
         location: SourceLocation,
         q: &mut TokenQueue,
     ) {
-        match DelayedLiteral::<T, REGIME>::new(datum) {
+        match LazyLiteral::<T, REGIME>::new(datum) {
             Some(l) => l.extend_tokens(q),
             None => q.push(Verbatim {
                 kind: ReparseKind::Literal,

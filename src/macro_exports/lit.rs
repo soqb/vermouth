@@ -12,22 +12,24 @@ use crate::{IntoTokens, TokenQueue, ctfe};
 /// as well as the actual value of the literal, as decided by rustc.
 ///
 /// Kinda like the following tuple.
-/// ```rust,ignore
+/// ```
+/// # // i hate myself for implementing this. why do i care. i don't know.
+/// # #[cfg(any())]
 /// (literal, stringify!(literal), Regime::from_str(stringify!(literal)))
 /// ```
 #[derive(Clone, Copy)]
-pub struct DelayedLiteral<T, const REGIME: u8> {
+pub struct LazyLiteral<T, const REGIME: u8> {
     data: T,
 }
 
-impl<T: LitContents, const REGIME: u8> DelayedLiteral<T, REGIME> {
+impl<T: LitContents, const REGIME: u8> LazyLiteral<T, REGIME> {
     #[inline]
-    pub fn new(data: T) -> Option<DelayedLiteral<T, REGIME>> {
-        const { Regime::parse(REGIME, T::PARSERS) }.map(|_| DelayedLiteral { data })
+    pub fn new(data: T) -> Option<LazyLiteral<T, REGIME>> {
+        const { Regime::parse(REGIME, T::PARSERS) }.map(|_| LazyLiteral { data })
     }
 }
 
-impl<T: LitContents, const REGIME: u8> IntoTokens for DelayedLiteral<T, REGIME> {
+impl<T: LitContents, const REGIME: u8> IntoTokens for LazyLiteral<T, REGIME> {
     #[inline]
     fn extend_tokens(self, buf: &mut TokenQueue) {
         let resolution = const { Regime::parse(REGIME, T::PARSERS) }.unwrap();

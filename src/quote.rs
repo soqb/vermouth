@@ -2,11 +2,15 @@
 
 use proc_macro::{Punct, Spacing, Span, TokenStream};
 
+// dawg i'm so tired of doing this
+#[cfg(doc)]
+use crate::{quote, verbatim};
+
 use crate::{IntoTokens, TokenQueue};
 
 /// Lazy quasi-quoting for Rust source.
 ///
-/// See also [`Transcriber`](crate::Transcriber) and [`TokenQueue`].
+/// See also [`Transcriber`] and [`TokenQueue`].
 ///
 /// Returns a value (a [`Transcriber`]) implementing [`IntoTokens`] which can be used to build a [`TokenStream`].
 ///
@@ -18,15 +22,25 @@ use crate::{IntoTokens, TokenQueue};
 /// [a `macro_rules!` transcriber](https://doc.rust-lang.org/nightly/reference/macros-by-example.html#r-macro.decl.transcription),
 /// using `$` rather than the `#` which `dtolnay/quote` uses:
 /// * `quote! { $foo }` inlines the contents of the variable `foo` into the evaluated token stream.
-///   `foo` must implement [`IntoTokens`](crate::IntoTokens).
+///   `foo` must implement [`IntoTokens`].
 /// * `quote! { $$ }` evaluates to just `$`.
 /// * unlike in `macro_rules!`, a lone `$` which might introduce ambiguity (e.g. `quote! { $ }`)
 ///   is always rejected.
 ///
-/// # Verbatim Tokens
+/// # Token Fidelity and Verbatim Tokens
 ///
 /// `quote` exploits compile-time introspection on token values to dramatically speed up transcription.
-/// This is constrains which tokens can be directly quoted somewhat; for instance, the following is rejected.
+/// This, however, limits how tokens are transcribed in two ways.
+///
+/// Factoring out a call to the [`verbatim`] macro will solve both issues
+/// by deferring to [`TokenStream::from_str`](TokenStream#impl-FromStr-for-TokenStream).
+/// This comes at about an order-of-magnitude runtime cost for the token in question only.
+///
+/// ## 1. A very niche subset of valid tokens is rejected at compile time
+///
+/// In particular, custom numeric suffixes (`100u256`) and string prefixes (`w"foobar"`)
+/// are supported by `verbatim` and not by `quote`, as is any yet-unreserved literal syntax.
+/// For instance, the following fails to compile.
 ///
 /// ```compile_fail
 /// # vermouth::ඞ_declare_test!();
@@ -35,13 +49,55 @@ use crate::{IntoTokens, TokenQueue};
 /// # ;
 /// ```
 ///
-/// To work around this, use the [`verbatim`](crate::verbatim!) macro.
+/// To work around this limitation, use the [`verbatim`] macro.
 ///
 /// ```
 /// # vermouth::ඞ_declare_test!();
 /// # use vermouth::{quote, verbatim};
 /// let v = verbatim!(100u256);
 /// quote! { let my_big_num = $v; }
+/// # ;
+/// ```
+///
+/// Note that we explicitly support the edge case where a new type for literal values (e.g. [`f128`])
+/// is added to the language and `vermouth` has not (yet 🤞) been updated to support it.
+/// We use a compile-time switch to fall back to the same implementation as `verbatim`.
+/// This is distinct from the cases above, where both `vermouth`
+/// _and_ the Rust compiler fail to recognise a literal which is nevertheless syntactically valid.
+///
+/// See [the reference](https://doc.rust-lang.org/nightly/reference/tokens.html)
+/// for the precise lexical structure of tokens in Rust today.
+///
+/// [`f128`]: https://github.com/rust-lang/rust/issues/116909
+///
+/// ## 2. Not all tokens are transcribed exactly as specified
+///
+/// Since we are limited by the methods which the standard library exposes,
+/// we cannot currently guarantee the syntactic form of emitted literal tokens.
+/// For example, the following two calls to `quote` are treated as if identical.
+///
+/// ```
+/// # vermouth::ඞ_declare_test!();
+/// # use vermouth::quote;
+/// quote! { "foobar" }
+/// # ;
+/// quote! { r###"foobar"### }
+/// # ;
+/// ```
+///
+/// Note that we leverage the Rust compiler's literal parsing to ensure
+/// that semantic meaning is always exactly preserved,
+/// this is a purely syntactic and largely innocuous inconsistency.
+/// For instance, `quote` _does_ guarantee that numeric literal suffixes will be respected.
+///
+/// ```
+/// # vermouth::ඞ_declare_test!();
+/// # use vermouth::quote;
+/// // numeric literal with usize type:
+/// quote! { 100usize }
+/// # ;
+/// // numeric literal with no specified type:
+/// quote! { 100 }
 /// # ;
 /// ```
 ///
@@ -78,15 +134,15 @@ macro_rules! quote {
             |_q| {
                 #[allow(unused_imports)]
                 use $crate::{IntoTokens as _, ඞ_macro_exports::{self as m, proc_macro, core, Spec, SpecLiteralQuote as _}};
-                $crate::ඞ_macro_quote_extend_impl! { _q $($t)* };
+                $crate::ඞ_macro_quote_extend_impl! { _q $({$t})* };
             },
         )
     };
 }
 
-/// A lazily-evaluated sequence of quoted tokens (what [`quote`](crate::quote!) evaluates to).
+/// A lazily-evaluated sequence of quoted tokens (what [`quote`] evaluates to).
 ///
-/// See also [`quote`](crate::quote!) and [`TokenQueue`].
+/// See also [`quote`] and [`TokenQueue`].
 ///
 /// [`Transcriber::from_fn`] can be used to manually construct a `Transcriber`, where one is required.
 #[must_use = "`Transcriber`s are lazily evaluated. See `TokenQueue::extend_from`."]
@@ -112,7 +168,7 @@ where
 
     /// Annotates all tokens within the transcriber with the given span.
     ///
-    /// ```rust
+    /// ```
     /// # vermouth::ඞ_declare_test!();
     /// # use vermouth::{quote, TokenQueue};
     /// # use proc_macro::Span;
@@ -120,7 +176,7 @@ where
     /// # let span = Span::call_site();
     /// # #[cfg(any())]
     /// let span: Span = omitted!();
-    ///
+    /// #
     /// let ref mut q = TokenQueue::new();
     /// q.extend_from(quote! { foo / bar }.with_span(span));
     /// ```
@@ -161,7 +217,7 @@ where
 
 /// The dollar doctor. Evaluates to `$`. Useful for escaping.
 ///
-/// See [`quote`](crate::quote!#escaping-) for use cases.
+/// See [`quote`](quote#escaping-) for use cases.
 #[derive(Debug, Clone, Copy)]
 pub struct Dr;
 
@@ -178,14 +234,8 @@ impl IntoTokens for Dr {
 /// Quotes a single token (either a literal, an ident, or a lifetime) in exactly the format supplied.
 ///
 /// This macro expands the range of quotable tokens, at the cost of performance,
-/// when compared to [`quote`](crate::quote!). See [the corresponding documentation](crate::quote!#verbatim-tokens).
-///
-/// For instance, custom numeric suffixes and string prefixes are supported (`100u256` or `w"foobar"`),
-/// but this is something like an order of magnitude slower than directly using `quote`,
-/// since we are not able to perform compile-time introspection on the tokens.
-///
-/// See [the reference](https://doc.rust-lang.org/nightly/reference/tokens.html)
-/// for the precise lexical structure of tokens.
+/// when compared to [`quote`].
+/// See [the corresponding documentation](quote#token-fidelity-and-verbatim-tokens).
 #[cfg_attr(docsrs, doc(cfg(feature = "quote")))]
 #[macro_export]
 macro_rules! verbatim {
@@ -216,24 +266,25 @@ macro_rules! verbatim {
 #[macro_export]
 macro_rules! ඞ_macro_quote_extend_impl {
     ($q:ident) => {};
-    ($q:ident $) => {
+    ($q:ident {$}) => {
         core::compile_error!("invalid quasi-quoting syntax: `$` cannot trail the input.");
     };
     ($q:ident $t:tt) => {
-        $crate::ඞ_macro_quote_tt_impl! { $q {$t} };
+        $crate::ඞ_macro_quote_tt_impl! { $q $t };
+    };
+    ($q:ident {$} {$n:ident}) => {
+        $n.extend_tokens($q);
     };
     ($q:ident $($t:tt)*) => {
-        // #[cfg(not(debug_assertions))]
-        // $crate::TokenQueue::reserve($q, $crate::ඞ_macro_quote_reserve_size! { $($t)* });
         $crate::ඞ_macro_quote_parse_matrix! {
             ඞ_macro_quote_emit
             $q
-            { _ _ _ _ _ $({$t})* }
-            { _ _ _ _ $({$t})* _ }
-            { _ _ _ $({$t})* _ _ }
-            { _ _ $({$t})* _ _ _ }
-            { _ $({$t})* _ _ _ _ }
-            { $({$t})* _ _ _ _ _ }
+            { _ _ _ _ _ $($t)* }
+            { _ _ _ _ $($t)* _ }
+            { _ _ _ $($t)* _ _ }
+            { _ _ $($t)* _ _ _ }
+            { _ $($t)* _ _ _ _ }
+            { $($t)* _ _ _ _ _ }
         }
     };
 }
@@ -265,68 +316,6 @@ macro_rules! ඞ_macro_quote_emit {
     (triple_at $cx:tt) => {
         core::compile_error!("the syntax `@@@` is not supported by `vermouth::quote`.");
     };
-}
-#[doc(hidden)]
-#[macro_export]
-macro_rules! ඞ_macro_quote_reserve_size {
-    () => { 0usize };
-    ($) => { 0usize };
-    ($t:tt) => {{
-        let mut v = 0usize;
-        $crate::ඞ_macro_quote_reserve_size_tt! { v {$t} }
-        v
-    }};
-    ($($t:tt)*) => {{
-        let mut v = 0usize;
-        $crate::ඞ_macro_quote_parse_matrix! {
-            ඞ_macro_quote_reserve_size_emit
-            v
-            { _ _ _ _ _ $({$t})* }
-            { _ _ _ _ $({$t})* _ }
-            { _ _ _ $({$t})* _ _ }
-            { _ _ $({$t})* _ _ _ }
-            { _ $({$t})* _ _ _ _ }
-            { $({$t})* _ _ _ _ _ }
-        }
-        v
-    }};
-}
-
-// NB: not a great metric, but overallocating is worse by benchmark.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! ඞ_macro_quote_reserve_size_tt {
-    ($v:ident _) => {};
-    ($v:ident ()) => {
-        $v = $v.wrapping_add(1usize);
-    };
-    ($v:ident {}) => {
-        $v = $v.wrapping_add(1usize);
-    };
-    ($v:ident []) => {
-        $v = $v.wrapping_add(1usize);
-    };
-    ($v:ident {$lt:lifetime}) => {
-        $v = $v.wrapping_add(2usize);
-    };
-    ($v:ident {$t:tt}) => {
-        $v = $v.wrapping_add(1usize);
-    };
-}
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! ඞ_macro_quote_reserve_size_emit {
-    (tt $v:ident $t:tt) => {
-        $crate::ඞ_macro_quote_reserve_size_tt! { $v $t }
-    };
-    (embed $v:ident $n:ident) => {
-        $v = $v.wrapping_add($n.queue_size_hint().0);
-    };
-    (rep $v:ident $n:ident $($t:tt)*) => {};
-    (seprep $v:ident $n:ident p:tt $($t:tt)*) => {};
-    (reserved $v:ident $t:tt) => {};
-    (triple_at $v:ident) => {};
 }
 
 #[doc(hidden)]
@@ -424,17 +413,17 @@ macro_rules! ඞ_macro_quote_tt_impl {
     };
     ($q:ident {($($t:tt)*)}) => {
         $crate::TokenQueue::open_substream($q);
-        $crate::ඞ_macro_quote_extend_impl! { $q $($t)* };
+        $crate::ඞ_macro_quote_extend_impl! { $q $({$t})* };
         $crate::TokenQueue::close_substream_and_push_as_group($q, proc_macro::Delimiter::Parenthesis);
     };
     ($q:ident {{$($t:tt)*}}) => {
         $crate::TokenQueue::open_substream($q);
-        $crate::ඞ_macro_quote_extend_impl! { $q $($t)* };
+        $crate::ඞ_macro_quote_extend_impl! { $q $({$t})* };
         $crate::TokenQueue::close_substream_and_push_as_group($q, proc_macro::Delimiter::Brace);
     };
     ($q:ident {[$($t:tt)*]}) => {
         $crate::TokenQueue::open_substream($q);
-        $crate::ඞ_macro_quote_extend_impl! { $q $($t)* };
+        $crate::ඞ_macro_quote_extend_impl! { $q $({$t})* };
         $crate::TokenQueue::close_substream_and_push_as_group($q, proc_macro::Delimiter::Bracket);
     };
     ($q:ident {$id:ident}) => {

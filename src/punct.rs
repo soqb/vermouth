@@ -6,7 +6,7 @@
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```
 /// use vermouth::punct_decompose;
 ///
 /// macro_rules! assert_makes_sense {

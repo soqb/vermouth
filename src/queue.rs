@@ -85,7 +85,7 @@ use crate::IntoTokens;
 /// ```
 ///
 /// Internally, the stack of open substreams is an intrusive, singly-linked list,
-/// ensuring opening and closing are fast.
+/// ensuring opening and closing are amortized to constant execution time.
 #[derive(Debug, Clone)]
 pub struct TokenQueue {
     chunks: Vec<Chunk>,
@@ -480,7 +480,7 @@ impl TokenQueue {
     ///
     /// Multiple span-tracking regions may be nested, but only the outermost span will be respected.
     ///
-    /// ```rust
+    /// ```
     /// # vermouth::ඞ_declare_test!();
     /// # use vermouth::{quote, TokenQueue};
     /// # use proc_macro::Span;
@@ -491,7 +491,7 @@ impl TokenQueue {
     /// # let b = Span::call_site();
     /// # #[cfg(any())]
     /// let b: Span = omitted!();
-    ///
+    /// #
     /// let ref mut q = TokenQueue::new();
     /// q.set_tracked_span(a);
     /// q.extend_from(quote! { 1 });
@@ -527,7 +527,7 @@ impl TokenQueue {
         self.span_tracking.current()
     }
 
-    /// Formats the queue as rust source.
+    /// Formats the queue as Rust source.
     ///
     /// # Stability
     /// This is primarily for debugging purposes,
@@ -654,12 +654,12 @@ trait ChunkBuf: Iterator<Item = Chunk> + Sized {
     #[inline]
     fn collect_by<B: FromTokens<T>, T>(mut self, t: T) -> B {
         if let Some(ts) = self.take_as_single_stream() {
-            // if the buf contains just a single steam elem, use that directly.
-            // this is useful for something like `quote! { #[$meta] }`.
+            // if the buf contains just a single stream elem, use that directly.
+            // this is useful for quoting something like `#[$meta]`.
             B::from_lone(t, ts)
         } else if let Some(tss) = self.as_unwrapped_streams() {
             // if the buf is all streams, get `proc_macro` to concat them directly, rather than copying ourselves.
-            // this is useful for something like `quote! { $attrs $item $trait_impls }`.
+            // this is useful for quoting something like `$attrs $item $trait_impls`.
             B::from_streams(t, tss)
         } else {
             let builder = TokenStreamBuilder {

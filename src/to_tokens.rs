@@ -8,18 +8,26 @@ use crate::TokenQueue;
 
 /// Methods for converting by-value into [`TokenQueue`].
 ///
-/// See also [`IntoTokens`], the analagous by-reference trait.
+/// See also [`RefToTokens`], the analagous by-reference trait.
 pub trait IntoTokens: Sized {
     /// Analagous to [`Iterator::size_hint`].
+    ///
+    /// # Interpretation
     ///
     /// Owing to the lazy design of [`TokenQueue`],
     /// this is the number of "commands" to push, rather than the raw token count,
     /// which is estimated by [`TokenQueue::token_size_hint`].
+    ///
+    /// Exactly what should be counted here is considered an implementation detail
+    /// and therefore not stable, as it depends on some open performance-related questions,
+    /// but currently:
+    /// * Pushing any [`TokenTree`](proc_macro::TokenTree) is exactly one command.
+    /// * Pushing a [`TokenStream`] is exactly one command.
     fn queue_size_hint(&self) -> (usize, Option<usize>) {
         (0, None)
     }
 
-    /// Extends an existing token buffer with the contents of a value.
+    /// Extends an existing token queue by value.
     fn extend_tokens(self, q: &mut TokenQueue);
 
     /// Converts by-value to a [`TokenQueue`].
@@ -28,23 +36,6 @@ pub trait IntoTokens: Sized {
         let mut q = TokenQueue::with_capacity(self.queue_size_hint().0);
         self.extend_tokens(&mut q);
         q
-    }
-}
-
-impl<T: IntoTokens + Clone> IntoTokens for &T {
-    #[inline]
-    fn queue_size_hint(&self) -> (usize, Option<usize>) {
-        (*self).queue_size_hint()
-    }
-
-    #[inline]
-    fn extend_tokens(self, q: &mut TokenQueue) {
-        self.clone().extend_tokens(q);
-    }
-
-    #[inline]
-    fn into_tokens(self) -> TokenQueue {
-        self.clone().into_tokens()
     }
 }
 
@@ -95,3 +86,26 @@ impl<T: IntoTokens> IntoTokens for Option<T> {
         self.as_ref().map_or((0, None), T::queue_size_hint)
     }
 }
+
+/// Marks a type as cheaply-clonable and suitable for
+/// [an automatic `&T: IntoTokens` implementation](IntoTokens#impl-IntoTokens-for-%26T).
+// FIXME: name?
+pub trait RefToTokens: IntoTokens + Clone {}
+
+/// See [`RefToTokens`].
+impl<T: RefToTokens> IntoTokens for &T {
+    fn extend_tokens(self, q: &mut TokenQueue) {
+        self.clone().extend_tokens(q)
+    }
+
+    fn queue_size_hint(&self) -> (usize, Option<usize>) {
+        (*self).queue_size_hint()
+    }
+
+    fn into_tokens(self) -> TokenQueue {
+        self.clone().into_tokens()
+    }
+}
+
+impl<T: RefToTokens> RefToTokens for &T {}
+impl RefToTokens for TokenStream {}
