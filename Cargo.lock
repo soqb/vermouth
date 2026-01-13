@@ -1810,7 +1810,7 @@ dependencies = [
 
 [[package]]
 name = "vermouth"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "document-features",
  "proc-macro2",

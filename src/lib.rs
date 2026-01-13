@@ -19,6 +19,16 @@
 //! _Fortification against [sin][`syn`]._
 //! A new kind of parser for procedural macros.
 //!
+#![cfg_attr(
+    docsrs,
+    doc = "
+[![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](#license)
+[![Crates.io](https://img.shields.io/crates/v/vermouth.svg)](https://crates.io/crates/vermouth)
+[![Downloads](https://img.shields.io/crates/d/vermouth.svg)](https://crates.io/crates/vermouth)
+[![Docs](https://docs.rs/vermouth/badge.svg)](https://docs.rs/vermouth/)
+"
+)]
+//!
 //! This crate aims to be a (not-quite) drop-in replacement for
 //! [David Tolnay]'s [`proc-macro2`] and [`quote`] crates,
 //! and an opinionated alternative to [`syn`].
