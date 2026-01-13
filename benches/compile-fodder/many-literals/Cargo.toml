@@ -1,6 +1,9 @@
 [package]
 name = "many-literals"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/soqb/vermouth"
+publish = false
 
 [dependencies]
 upstream = { path = "upstream", package = "many-literals-upstream", default-features = false }

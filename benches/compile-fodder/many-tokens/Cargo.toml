@@ -1,6 +1,9 @@
 [package]
 name = "many-tokens"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/soqb/vermouth"
+publish = false
 
 [dependencies]
 upstream = { path = "upstream", package = "many-tokens-upstream", default-features = false }
