@@ -4,9 +4,11 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/soqb/vermouth"
 publish = false
+autobins = false
 
-[[bin]]
+[[bench]]
 name = "benches"
+path = "src/main.rs"
 harness = false
 
 [dependencies]
