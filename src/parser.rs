@@ -190,7 +190,7 @@ impl Parser {
 
     /// Inserts another [`Diagnostic`] into the parser's internal diagnostics buffer.
     ///
-    /// These diagnostics can be emitted with the [`Parser::emit_diagnostics`] method.
+    /// These diagnostics can be emitted with the [`Parser::finish_diagnostics`] method.
     #[inline]
     pub fn report(&mut self, err: impl Into<Diagnostic>) {
         self.diag_buf.push(err.into());
@@ -198,7 +198,7 @@ impl Parser {
 
     /// If passed `Err`, [report it] and return `false`. Returns `true` otherwise.
     ///
-    /// These diagnostics can be emitted with the [`Parser::emit_diagnostics`] method.
+    /// These diagnostics can be emitted with the [`Parser::finish_diagnostics`] method.
     ///
     /// [report it]: Parser::report
     #[inline]
@@ -221,10 +221,12 @@ impl Parser {
         }
     }
 
+    /// Returns `true` if the parser stream contains no tokens after the cursor.
     pub fn is_empty(&self) -> bool {
         self.here().is_eos()
     }
 
+    /// Returns the token from the stream just after the cursor, without moving the cursor.
     pub fn peek(&self) -> Option<TokenTree> {
         self.stream.peek()
     }
@@ -458,17 +460,18 @@ impl Parser {
         self.stream.seek_to(idx);
     }
 
-    /// Returns all compile errors [reported] during parsing and emits all diagnostics.
+    /// Returns an opaque [`IntoTokens`] instance which lazily emits
+    /// all diagnostics [reported] during parsing.
     ///
-    /// This method has the same semantics as [`Diagnostic::emit`].
+    /// This method has the same semantics as [`Diagnostic::finish`].
     ///
     /// [reported]: Parser::report
-    pub fn emit_diagnostics(&mut self) -> impl IntoTokens {
+    pub fn finish_diagnostics(&mut self) -> impl IntoTokens {
         struct Wrap<T>(T);
         impl<T: Iterator<Item = Diagnostic>> IntoTokens for Wrap<T> {
             fn extend_tokens(self, q: &mut TokenQueue) {
                 for d in self.0 {
-                    q.extend_from(d.emit());
+                    q.extend_from(d.finish());
                 }
             }
         }

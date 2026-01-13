@@ -230,11 +230,15 @@ impl Expected {
         cx.seek_to(&self.pos)
     }
 
+    /// Appends additional information to the diagnostic message.
     #[inline]
     pub fn add_note(&mut self, note: impl fmt::Display + fmt::Debug + 'static) {
         self.notes.push(Box::new(note));
     }
 
+    /// Appends additional information to the diagnostic message.
+    ///
+    /// See [`Expected::add_note`].
     #[inline]
     #[must_use]
     pub fn with_note(mut self, note: impl fmt::Display + fmt::Debug + 'static) -> Self {
@@ -331,8 +335,8 @@ impl PartialEq for DiagnosticKind {
 ///
 /// ## Reporting
 ///
-/// To emit accumulated diagnostics at runtime, [`Diagnostic::emit`] and [`Diagnostic::emit_many`]
-/// return `TokenQueue`s which evaluate to a series of invocations of the [`compile_error`] macro.
+/// To emit accumulated diagnostics at runtime, [`Diagnostic::finish`] and [`Parser::finish_diagnostics`]
+/// return opaque `IntoTokens` invocations which evaluate to a series of invocations of the [`compile_error`] macro.
 ///
 /// **NB:** The following is subject to change:
 ///
@@ -475,8 +479,9 @@ impl Diagnostic {
         }
     }
 
+    /// Returns an opaque [`IntoTokens`] which lazily emits the error upon conversion.
     #[must_use = "accumulated errors must be returned from the proc-macro."]
-    pub fn emit(self) -> impl IntoTokens {
+    pub fn finish(self) -> impl IntoTokens {
         self.kind
     }
 }

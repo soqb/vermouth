@@ -18,7 +18,12 @@ pub enum CfgLeaf<T> {
     /// Some specific non-`cfg` syntax.
     Other(T),
     /// `cfg`.
-    Cfg { meta: TokenStream },
+    Cfg {
+        /// The [meta item] which gates this `cfg`.
+        ///
+        /// [meta item]: https://doc.rust-lang.org/nightly/reference/attributes.html#meta-item-attribute-syntax
+        meta: TokenStream,
+    },
 }
 
 impl<T: Parse> Parse for CfgLeaf<T> {
@@ -113,6 +118,9 @@ fn cfgable_extend_tokens<T: IntoTokens>(metas: &[TokenStream], inner: T, q: &mut
 }
 
 impl<T> Cfgable<T> {
+    /// Reparameterises a `cfg_attr` attribute into a `cfg`.
+    ///
+    /// For example, `cfg_attr(foo, cfg_attr(bar, baz))` becomes `cfg_attr(foo, cfg(bar))`.
     pub fn extend_tokens_as_cfg(&self, buf: &mut TokenQueue) {
         let Some((last, rest)) = self.cfg_attr_metas.split_last() else {
             return;
@@ -123,7 +131,7 @@ impl<T> Cfgable<T> {
 
     /// Reparameterises a `cfg_attr` attribute into a `cfg`.
     ///
-    /// For example, `cfg_attr(foo, cfg_attr(bar, baz))` becomes `cfg_attr(foo, cfg(bar))`.
+    /// See [`Cfgable::extend_tokens_as_cfg`].
     pub fn to_tokens_as_cfg(&self) -> TokenQueue {
         let mut q = TokenQueue::new();
         self.extend_tokens_as_cfg(&mut q);
@@ -152,9 +160,17 @@ impl<T: IntoTokens> IntoTokens for Cfgable<T> {
 /// [meta item]: https://doc.rust-lang.org/nightly/reference/attributes.html#meta-item-attribute-syntax
 pub enum Attribute<O, I> {
     /// An outer attribute like `#[foo]`.
-    Outer { contents: O },
+    Outer {
+        /// The contents of an outer attribute.
+        contents: O,
+    },
     /// An inner attribute like `#![foo]`.
-    Inner { contents: I, bang: Punct },
+    Inner {
+        /// The contents of an inner attribute.
+        contents: I,
+        /// The bang which demarcates this attribute as an inner attribute.
+        bang: Punct,
+    },
 }
 
 impl<O, I> Attribute<O, I> {
@@ -337,7 +353,7 @@ where
     }
 }
 
-/// A trait extending [`Iterator`]s over [`Attributes`].
+/// A trait extending [`Iterator`]s over [`Attribute`]s.
 pub trait AttrIterExt<O, I>: Iterator<Item = Attribute<O, I>> + Sized {
     /// Analagous to [`Iterator::fold`], but separating inner and outer attributes.
     fn fold_separately<Bo, Bi>(

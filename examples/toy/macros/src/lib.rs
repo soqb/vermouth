@@ -37,5 +37,5 @@ fn parrot_diagnostic_impl(cx: &mut Parser) -> vermouth::Result<()> {
 pub fn parrot_diagnostic(tokens: TokenStream) -> TokenStream {
     let ref mut cx = Parser::new(tokens, Span::call_site());
     let _ = parrot_diagnostic_impl(cx).map_err(|exp| cx.report(exp));
-    cx.emit_diagnostics().into_tokens().into()
+    cx.finish_diagnostics().into_tokens().into()
 }

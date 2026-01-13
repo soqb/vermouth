@@ -56,10 +56,10 @@ default = ["quote"]
 
 ## Enables the complete suite of parsing utilities.
 complete = ["quote", "attributes", "warnings"]
-## Enables [parsing](crate::Parser).
-parse = []
 ## Enables [quasi quoting](crate::quote!).
 quote = []
+## Enables [parsing](crate::Parser).
+parse = []
 ## Provides support and utilities for parsing and handling Rust attributes.
 attributes = ["parse"]
 ## Enables emitting diagnostic warnings through the [`Diagnostic`] API.
