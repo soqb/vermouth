@@ -7,8 +7,53 @@ use proc_macro::Span;
 
 use crate::{IntoTokens, Parser, ParserPos, ToSpan, TokenQueue};
 
-#[cfg_attr(feature = "unstable-diagnostics-backend", path = "emit_unstable.rs")]
+#[cfg_attr(
+    feature = "unstable-diagnostics-backend-stdlib",
+    path = "emit_stdlib.rs"
+)]
+#[cfg_attr(
+    all(
+        not(feature = "unstable-diagnostics-backend-stdlib"),
+        feature = "unstable-diagnostics-backend-format-json"
+    ),
+    path = "emit_format_json.rs"
+)]
 mod emit;
+
+/// Emits an invocation of [the `compile_error` macro](compile_error) to report errors.
+#[allow(dead_code)]
+pub(self) fn emit_compile_error_invocation(q: &mut TokenQueue, span: Span, msg: String) {
+    use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, TokenStream, TokenTree};
+    // NB: we don't have access to the `quote`, since that macro is behind an orthogonal feature.
+    macro_rules! quote_path {
+        ($buf:ident <-) => {};
+        ($buf:ident <- :: $n:ident $(:: $r:ident)*) => {
+            let mut p = Punct::new(':', Spacing::Joint);
+            p.set_span(span);
+            $buf.push(p);
+            let mut p = Punct::new(':', Spacing::Alone);
+            p.set_span(span);
+            $buf.push(p);
+            $buf.push(Ident::new(stringify!($n), span));
+
+            // recurse
+            quote_path!($buf <- $(:: $r)*)
+        };
+    }
+
+    quote_path!(q <- ::core::compile_error);
+
+    q.push(Punct::new('!', Spacing::Alone));
+
+    let mut msg: TokenTree = Literal::string(&msg).into();
+    msg.set_span(span);
+
+    let mut group = Group::new(Delimiter::Parenthesis, TokenStream::from_iter([msg]));
+    group.set_span(span);
+    q.push(group);
+
+    q.push(Punct::new(';', Spacing::Alone));
+}
 
 /// An alias for the standard library [`Result`](core::result::Result).
 ///
@@ -338,10 +383,14 @@ impl PartialEq for DiagnosticKind {
 /// To emit accumulated diagnostics at runtime, [`Diagnostic::finish`] and [`Parser::finish_diagnostics`]
 /// return opaque `IntoTokens` invocations which evaluate to a series of invocations of the [`compile_error`] macro.
 ///
-/// **NB:** The following is subject to change:
+/// <div class="warning">
 ///
-/// In stable Rust (as of version 1.92),
-/// there is no built-in support for emitting diagnostics other than compile errors.
+/// The following is subject to change.
+///
+/// </div>
+///
+/// Stable Rust (as of version 1.92),
+/// has no built-in support for emitting diagnostics other than compile errors.
 /// However, by enabling the `"warnings"` feature, `vermouth` will provide
 /// best effort support for custom
 #[cfg_attr(not(feature = "warnings"), doc = "warnings")]
@@ -349,7 +398,7 @@ impl PartialEq for DiagnosticKind {
 /// by carefully emitting `#[must_use]` attributes.
 ///
 /// If using a nightly toolchain, enabling the
-/// <a class="stab portability" href="index.html#feature-unstable-diagnostics-backend"><code>unstable-diagnostics-backend</code></a>
+/// <a class="stab portability" href="index.html#feature-unstable-diagnostics-backend-stdlib"><code>unstable-diagnostics-backend-stdlib</code></a>
 /// feature will use the experimental
 /// <a class="stab portability" href="https://github.com/rust-lang/rust/issues/54140"><code>proc_macro_diagnostic</code></a>
 /// feature of the `proc_macro` crate to emit higher-quality diagnostics.
@@ -489,10 +538,10 @@ impl IntoTokens for DiagnosticKind {
     fn extend_tokens(self, q: &mut TokenQueue) {
         match self {
             DiagnosticKind::Expected(exp) => {
-                emit::emit(q, DiagnosticLevel::Error, exp.pos.span(), &exp.to_string())
+                emit::emit(q, DiagnosticLevel::Error, exp.pos.span(), exp.to_string())
             }
             DiagnosticKind::Custom(custom) => {
-                emit::emit(q, custom.level, custom.span, &custom.msg.to_string())
+                emit::emit(q, custom.level, custom.span, custom.msg.to_string())
             }
             DiagnosticKind::Join(errors) => {
                 for err in errors {

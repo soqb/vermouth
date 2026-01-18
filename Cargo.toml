@@ -1,6 +1,6 @@
 [package]
 name = "vermouth"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 description = "a new kind of parser for procedural macros"
 license = "MIT OR Apache-2.0"
@@ -33,7 +33,7 @@ macrobench = { version = "0.1.0", path = "macrobench" }
 [workspace.dependencies.proc-macro2]
 # we lock the version to a range since there's no tangible guarantee
 # that `proc-macro2` matches `proc_macro` in enough detail.
-version = ">=1.0.103, <=1.0.104"
+version = ">=1.0.103, <=1.0.105"
 
 [workspace.lints.clippy]
 toplevel_ref_arg = "allow"
@@ -65,26 +65,33 @@ parse = ["dep:smallvec"]
 attributes = ["parse"]
 ## Enables emitting diagnostic warnings through the [`Diagnostic`] API.
 warnings = []
+
+#! ## Unstable Features
+#!
+#! <div class="warning">
+#!
+#! Tread lightly.
+#! These features may require a nightly compiler, and enabling any of them in a crate's dependencies
+#! explicitly voids all semver guarantees _your_ crate may promise.
+#! 
+#! </div>
+#!
+
 ## Rewires this crate to build on top of the [`proc-macro2`] crate,
 ## instead of the default, officially supported `proc_macro` crate.
-##
-## <div class="warning">
-##
-## This feature should be enabled with caution, and it is considered a major breaking change to do so.
-## Due to the risks of compounding additive features across dependencies,
-## it can be problematic to enable this feature in a library, since it may break other dependents of this crate.
-##
-## </div>
+## 
+## You may use this to build testing infrastructure for your proc-macros,
+## but are advised against enabling this in a library.
 ##
 ## [`proc-macro2`]: https://crates.io/crates/proc-macro2
 proc-macro2 = ["dep:proc-macro2", "proc-macro2/span-locations"]
-
-#! ## Unstable Features <i>(nightly)</i>
-
 ## Enables the standard library's experimental
 ## <a class="stab portability" href="https://github.com/rust-lang/rust/issues/54140"><code>proc_macro_diagnostic</code></a>
 ## feature for higher quality diagnostics.
-unstable-diagnostics-backend = []
+unstable-diagnostics-backend-stdlib = []
+## Enables experimental support for custom diagnostics through passing
+## JSON messages directly to cargo.
+unstable-diagnostics-backend-format-json = []
 
 # do not enable. used for docs.rs only.
 internal-document-features = ["dep:document-features"]

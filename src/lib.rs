@@ -5,7 +5,7 @@
     html_favicon_url = "https://raw.githubusercontent.com/soqb/vermouth/trunk/assets/logo-icon.png"
 )]
 #![cfg_attr(
-    feature = "unstable-diagnostics-backend",
+    feature = "unstable-diagnostics-backend-stdlib",
     feature(
         // the `vermouth` feature `"unstable-diagnostics-backend"`
         // requires a nightly toolchain.
@@ -59,15 +59,22 @@
         feature_label = r##"<a class="stab portability" id="feature-{feature}" href="#feature-{feature}"><code>{feature}</code></a>"##
     ),
 )]
+//! # MSRV
+//!
+//! Note that while we don't have an official policy with regards to our MSRV,
+//! expect it to be tied high for some time.
 
 #[cfg(not(feature = "proc-macro2"))]
 extern crate proc_macro;
 #[cfg(feature = "proc-macro2")]
 extern crate proc_macro2 as proc_macro;
 
-#[cfg(all(feature = "proc-macro2", feature = "unstable-diagnostics-backend"))]
+#[cfg(all(
+    feature = "proc-macro2",
+    feature = "unstable-diagnostics-backend-stdlib"
+))]
 compile_error!(
-    "`vermouth` does not support enabling both the `proc-macro2` and `unstable-diagnostics-backend` features \
+    "`vermouth` does not support enabling both the `proc-macro2` and `unstable-diagnostics-backend-stdlib` features \
     due to limitations in the implementation of `proc-macro2`"
 );
 

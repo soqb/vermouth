@@ -13,4 +13,4 @@ workspace = true
 proc-macro = true
 
 [dependencies]
-vermouth = { workspace = true, features = ["warnings", "attributes"] }
+vermouth = { workspace = true, features = ["warnings", "parse"] }
