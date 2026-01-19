@@ -2,13 +2,10 @@
 
 use std::marker::PhantomData;
 
-use crate::{
-    IntoTokens, TokenQueue,
-    ඞ_macro_exports::{SourceLocation, Verbatim},
-};
+use crate::{IntoTokens, TokenQueue, ඞ_macro_exports::Verbatim};
 
 use super::{
-    ReparseKind,
+    VerbatimKind,
     lit::{LazyLiteral, LitContents},
 };
 
@@ -32,7 +29,6 @@ pub trait SpecLiteralQuote: Sized {
         self,
         datum: &Self::Datum,
         text: &'static str,
-        location: SourceLocation,
         q: &mut TokenQueue,
     );
 }
@@ -41,20 +37,10 @@ impl<T: LitContents> SpecLiteralQuote for Spec<T> {
     type Datum = T;
 
     #[inline(always)]
-    fn ඞ_lit_quote<const REGIME: u8>(
-        self,
-        &datum: &T,
-        text: &'static str,
-        location: SourceLocation,
-        q: &mut TokenQueue,
-    ) {
+    fn ඞ_lit_quote<const REGIME: u8>(self, &datum: &T, text: &'static str, q: &mut TokenQueue) {
         match LazyLiteral::<T, REGIME>::new(datum) {
             Some(l) => l.extend_tokens(q),
-            None => q.push(Verbatim {
-                kind: ReparseKind::Literal,
-                text,
-                location,
-            }),
+            None => q.push(Verbatim::new(text, VerbatimKind::Literal)),
         }
     }
 }
@@ -64,17 +50,7 @@ impl<T> SpecLiteralQuote for &Spec<T> {
     type Datum = T;
 
     #[inline(always)]
-    fn ඞ_lit_quote<const REGIME: u8>(
-        self,
-        _: &T,
-        text: &'static str,
-        location: SourceLocation,
-        q: &mut TokenQueue,
-    ) {
-        q.push(Verbatim {
-            kind: ReparseKind::Literal,
-            text,
-            location,
-        })
+    fn ඞ_lit_quote<const REGIME: u8>(self, _: &T, text: &'static str, q: &mut TokenQueue) {
+        q.push(Verbatim::new(text, VerbatimKind::Literal))
     }
 }

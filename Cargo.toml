@@ -1,6 +1,6 @@
 [package]
 name = "vermouth"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2024"
 description = "a new kind of parser for procedural macros"
 license = "MIT OR Apache-2.0"
@@ -49,6 +49,9 @@ smallvec = { workspace = true, optional = true }
 document-features = { workspace = true, optional = true }
 proc-macro2 = { workspace = true, optional = true }
 
+[profile.dev.dev-dependencies]
+vermouth = { workspace = true, features = ["internal-dev-hack"] }
+
 [features]
 default = ["quote"]
 
@@ -95,6 +98,8 @@ unstable-diagnostics-backend-format-json = []
 
 # do not enable. used for docs.rs only.
 internal-document-features = ["dep:document-features"]
+internal-dev-hack = []
+internal-r-a-hack = []
 
 [package.metadata.docs.rs]
 features = ["complete", "internal-document-features"]
@@ -102,5 +107,7 @@ features = ["complete", "internal-document-features"]
 [package.metadata.cargo-all-features]
 skip_feature_sets = [
     ["internal-document-features"],
+    ["internal-dev-hack"],
+    ["internal-r-a-hack"],
     ["proc-macro2", "unstable-diagnostics-backend"],
 ]

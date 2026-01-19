@@ -18,7 +18,7 @@ pub(super) fn emit(q: &mut TokenQueue, level: DiagnosticLevel, span: Span, msg: 
     let msg = msg.to_string();
     let msg2 = format!("{level}: {msg}\n  --> {file}:{line}:{column}");
     eprintln!(
-        r#"{{"$message_type":"diagnostic","message":"{msg}","code":{{"code":"my_balls","explanation":null}},"level":"{level}","spans":[{span}],"children":[],"rendered":"{rendered}"}}"#,
+        r#"{{"$message_type":"diagnostic","message":"{msg}","code":null,"level":"{level}","spans":[{span}],"children":[],"rendered":"{rendered}"}}"#,
         msg = json_escape(&msg),
         span = span_str(span.span()),
         rendered = json_escape(&msg2),

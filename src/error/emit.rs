@@ -1,9 +1,10 @@
-use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenStream};
+use proc_macro::Span;
 
 use crate::{DiagnosticLevel, ToSpan, TokenQueue};
 
 #[cfg(feature = "warnings")]
 fn emit_warning(buf: &mut TokenQueue, span: Span, mut msg: String) {
+    use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenStream};
     fn in_const_block(q: &mut TokenQueue, f: impl FnOnce(&mut TokenQueue)) {
         q.push(Ident::new("const", Span::call_site()));
         q.push(Ident::new("_", Span::call_site()));

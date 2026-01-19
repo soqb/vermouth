@@ -32,8 +32,7 @@
 //! This crate aims to be a (not-quite) drop-in replacement for
 //! [David Tolnay]'s [`proc-macro2`] and [`quote`] crates,
 //! and an opinionated alternative to [`syn`].
-//!
-//! Opposing [`syn`],
+//! Opposing `syn`,
 //! this crate is designed around the philosophy that malformed input
 //! should be handled gracefully by procedural macros.
 //!
@@ -91,9 +90,12 @@ compile_error!(
 #[macro_export]
 macro_rules! ඞ_declare_test {
     () => {
-        // FIXME: i want a compile error when this is used without `-Fproc-macro2`
-        //   but not to proc in r-a. somebody help :(((.
-
+        #[cfg(all(
+            feature = "internal-dev-hack",
+            not(feature = "proc-macro2"),
+            not(feature = "internal-r-a-hack")
+        ))]
+        ::core::compile_error!("make sure to run tests with -Fproc-macro2");
         // even if we just spat out a compile error,
         // we still import a (non-functional) crate
         // to suppress errors about bad imports.

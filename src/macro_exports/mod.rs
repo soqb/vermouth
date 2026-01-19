@@ -2,8 +2,7 @@
 
 use proc_macro::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream};
 
-use crate::{IntoTokens, PushToken, TokenQueue, ctfe};
-use std::{fmt, str::FromStr};
+use crate::{IntoTokens, PushToken, TokenQueue, Verbatim, VerbatimKind, ctfe};
 
 pub use core;
 pub use proc_macro;
@@ -33,72 +32,6 @@ pub fn push_empty_group(q: &mut TokenQueue, delim: Delimiter) {
     q.push(Group::new(delim, TokenStream::new()));
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum ReparseKind {
-    Ident,
-    Literal,
-    Lifetime,
-}
-
-impl fmt::Display for ReparseKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            ReparseKind::Ident => "ident",
-            ReparseKind::Literal => "literal",
-            ReparseKind::Lifetime => "lifetime",
-        };
-        f.write_str(s)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct SourceLocation {
-    pub file: &'static str,
-    pub line: u32,
-    pub column: u32,
-}
-
-impl fmt::Display for SourceLocation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let SourceLocation { file, line, column } = self;
-        write!(f, "in {file} at {line}:{column}")
-    }
-}
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! ඞ_macro_capture_source_location {
-    () => {
-        $crate::ඞ_macro_exports::SourceLocation {
-            file: $crate::ඞ_macro_exports::core::file!(),
-            line: $crate::ඞ_macro_exports::core::line!(),
-            column: $crate::ඞ_macro_exports::core::column!(),
-        }
-    };
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Verbatim {
-    pub text: &'static str,
-    pub kind: ReparseKind,
-    pub location: SourceLocation,
-}
-
-impl IntoTokens for Verbatim {
-    fn extend_tokens(self, q: &mut TokenQueue) {
-        let Verbatim {
-            text,
-            kind,
-            location,
-        } = self;
-        let tt = TokenStream::from_str(text).unwrap_or_else(move |lex| {
-            panic!("failed to reparse {kind} {text:?} {location}: {lex}")
-        });
-        q.push(tt);
-    }
-}
-impl PushToken for Verbatim {}
-
 #[inline]
 pub fn push_punct(q: &mut TokenQueue, chars: &[char]) {
     let Some((&last, rest)) = chars.split_last() else {
@@ -112,11 +45,13 @@ pub fn push_punct(q: &mut TokenQueue, chars: &[char]) {
     q.push(Punct::new(last, Spacing::Alone));
 }
 
-pub const fn parse_ident(s: &'static str, location: SourceLocation) -> impl PushToken {
-    parse_ident_like(ReparseKind::Ident, s, location)
+#[track_caller]
+pub const fn parse_ident(s: &'static str) -> impl PushToken {
+    parse_ident_like(VerbatimKind::Ident, s)
 }
 
-pub const fn parse_lifetime(s: &'static str, location: SourceLocation) -> impl PushToken {
+#[track_caller]
+pub const fn parse_lifetime(s: &'static str) -> impl PushToken {
     #[derive(Clone, Copy)]
     struct Lifetime<T>(T);
 
@@ -132,14 +67,11 @@ pub const fn parse_lifetime(s: &'static str, location: SourceLocation) -> impl P
     // NB: no assert_eq bc const.
     let (f, s) = s.split_at(1);
     assert!(matches!(f.as_bytes(), b"\'"));
-    Lifetime(parse_ident_like(ReparseKind::Lifetime, s, location))
+    Lifetime(parse_ident_like(VerbatimKind::Lifetime, s))
 }
 
-const fn parse_ident_like(
-    kind: ReparseKind,
-    s: &'static str,
-    location: SourceLocation,
-) -> impl PushToken {
+#[track_caller]
+const fn parse_ident_like(kind: VerbatimKind, s: &'static str) -> impl PushToken {
     #[derive(Clone, Copy)]
     enum IdentParse {
         Raw(&'static str),
@@ -165,11 +97,7 @@ const fn parse_ident_like(
         {
             IdentParse::Raw(raw)
         } else {
-            IdentParse::Fallback(Verbatim {
-                text: s,
-                kind,
-                location,
-            })
+            IdentParse::Fallback(Verbatim::new(s, kind))
         }
     } else {
         IdentParse::Notraw(s)
