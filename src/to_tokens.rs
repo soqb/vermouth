@@ -21,8 +21,7 @@ pub trait IntoTokens: Sized {
     /// Exactly what should be counted here is considered an implementation detail
     /// and therefore not stable, as it depends on some open performance-related questions,
     /// but currently:
-    /// * Pushing any [`TokenTree`](proc_macro::TokenTree) is exactly one command.
-    /// * Pushing a [`TokenStream`] is exactly one command.
+    /// * [Pushing](TokenQueue::push) anything is exactly one command.
     fn queue_size_hint(&self) -> (usize, Option<usize>) {
         (0, None)
     }
@@ -50,20 +49,6 @@ impl IntoTokens for () {
 impl IntoTokens for Infallible {
     fn extend_tokens(self, _: &mut TokenQueue) {
         match self {}
-    }
-}
-
-impl IntoTokens for TokenStream {
-    fn extend_tokens(self, buf: &mut TokenQueue) {
-        buf.push(self);
-    }
-
-    fn into_tokens(self) -> TokenQueue {
-        self.into()
-    }
-
-    fn queue_size_hint(&self) -> (usize, Option<usize>) {
-        (!self.is_empty() as usize, None)
     }
 }
 

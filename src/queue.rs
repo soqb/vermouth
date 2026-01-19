@@ -324,6 +324,20 @@ macro_rules! impl_into_tokens_for_tt {
 
 impl_into_tokens_for_tt! { TokenTree, Punct, Ident, Group, Literal }
 
+impl IntoTokens for TokenStream {
+    fn extend_tokens(self, q: &mut TokenQueue) {
+        q.chunks.push(self.into());
+    }
+
+    fn into_tokens(self) -> TokenQueue {
+        self.into()
+    }
+
+    fn queue_size_hint(&self) -> (usize, Option<usize>) {
+        (!self.is_empty() as usize, None)
+    }
+}
+
 /// Invokes the given macro with all of the implementors of `Into<Chunk>`.
 ///
 /// This is a kind of AOT monomorphisation, which is not done for performance,
@@ -337,6 +351,8 @@ macro_rules! enumerate_into_chunk_implementors {
     };
 }
 
+/// A marker trait indicating that this [`IntoTokens`] implementation executes in amortized constant time.
+///
 /// See [`TokenQueue::push`].
 pub trait PushToken: IntoTokens {}
 
@@ -413,14 +429,12 @@ impl TokenQueue {
 
     /// Appends the given element to the queue.
     ///
-    /// # Type Support
-    /// The following types are currently supported.
-    /// * [`TokenStream`]
-    /// * [`TokenTree`]
-    /// * [`Punct`]
-    /// * [`Ident`]
-    /// * [`Literal`]
-    /// * [`Group`]
+    /// This is identical to [`extend_from`](TokenQueue::extend_from),
+    /// except it binds additionally to [`PushToken`]
+    /// which ensures that the extension operation executes in amortized constant time.
+    /// This is a logic guarantee, and should not be relied upon by unsafe code.
+    ///
+    /// See [the implementors of `PushToken`](PushToken#implementors).
     pub fn push<T: PushToken>(&mut self, t: T) {
         self.extend_from(t);
     }
@@ -432,8 +446,6 @@ impl TokenQueue {
 
     /// Enqueues some tokens via [`IntoTokens::extend_tokens`].
     pub fn extend_from<T: IntoTokens>(&mut self, t: T) {
-        // self.chunks.extend_from_slice(&rhs.chunks);
-        // self.stack_depth += rhs.stack_depth;
         t.extend_tokens(self)
     }
 
