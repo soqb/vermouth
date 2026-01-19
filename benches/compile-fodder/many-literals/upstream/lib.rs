@@ -1,50 +1,42 @@
 use proc_macro::TokenStream;
 use std::hint::black_box;
 
-#[cfg(feature = "dtolnay")]
-use quote::quote;
-#[cfg(feature = "vermouth")]
-use vermouth::quote;
-
+// 256 * 2^14 = 2^22 = 4194304 tokens per invocation
 #[allow(dead_code)]
 const LEN: usize = 256;
 const ITERS: usize = 2usize.pow(14);
 
-#[cfg(any(feature = "vermouth", feature = "dtolnay"))]
+#[cfg(feature = "dtolnay")]
+mod dtolnay {
+    use super::*;
+    use ::quote::quote;
+    include!("impl.rs");
+}
+
+#[cfg(feature = "vermouth")]
+mod vermouth {
+    use super::*;
+    use ::vermouth::quote;
+    include!("impl.rs");
+}
+
+#[allow(unreachable_code)]
 #[proc_macro]
 pub fn feel_the_burn(_ts: TokenStream) -> TokenStream {
-    // 256 * 2^14 = 2^22 = 4194304 tokens per invocation
-    for _ in 0..ITERS {
-        let tokens = quote! {
-            """""""" """""""" """""""" """"""""
-            """""""" """""""" """""""" """"""""
-            """""""" """""""" """""""" """"""""
-            """""""" """""""" """""""" """"""""
+    #[cfg(feature = "vermouth")]
+    vermouth::bench();
 
-            """""""" """""""" """""""" """"""""
-            """""""" """""""" """""""" """"""""
-            """""""" """""""" """""""" """"""""
-            """""""" """""""" """""""" """"""""
+    #[cfg(feature = "dtolnay")]
+    dtolnay::bench();
 
-            """""""" """""""" """""""" """"""""
-            """""""" """""""" """""""" """"""""
-            """""""" """""""" """""""" """"""""
-            """""""" """""""" """""""" """"""""
-
-            """""""" """""""" """""""" """"""""
-            """""""" """""""" """""""" """"""""
-            """""""" """""""" """""""" """"""""
-            """""""" """""""" """""""" """"""""
-        };
-        let _ = black_box(TokenStream::from(tokens));
-    }
+    #[cfg(not(any(feature = "dtolnay", feature = "vermouth")))]
+    bench_fallback();
 
     TokenStream::new()
 }
 
-#[cfg(not(any(feature = "vermouth", feature = "dtolnay")))]
-#[proc_macro]
-pub fn feel_the_burn(_ts: TokenStream) -> TokenStream {
+#[allow(dead_code)]
+fn bench_fallback() {
     // this is our best-effort attempt at isolating the API cost of these approaches.
     // compared to the above, especially on -O3, this iterator is basically free.
     let l = proc_macro::Literal::string("");
@@ -53,6 +45,4 @@ pub fn feel_the_burn(_ts: TokenStream) -> TokenStream {
     for _ in 0..ITERS {
         let _ = black_box(TokenStream::from_iter(it.clone()));
     }
-
-    TokenStream::new()
 }

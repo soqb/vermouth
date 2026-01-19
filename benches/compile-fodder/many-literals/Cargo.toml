@@ -9,5 +9,11 @@ publish = false
 upstream = { path = "upstream", package = "many-literals-upstream", default-features = false }
 
 [features]
+default = ["vermouth", "dtolnay"]
 vermouth = ["upstream/vermouth"]
 dtolnay = ["upstream/dtolnay"]
+
+[package.metadata.cargo-all-features]
+skip_feature_sets = [
+    ["vermouth", "dtolnay"]
+]

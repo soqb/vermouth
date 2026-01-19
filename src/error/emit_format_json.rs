@@ -8,6 +8,7 @@ use proc_macro::Span;
 use crate::{DiagnosticLevel, ToSpan, TokenQueue};
 
 pub(super) fn emit(q: &mut TokenQueue, level: DiagnosticLevel, span: Span, msg: String) {
+    #[allow(irrefutable_let_patterns)]
     if let DiagnosticLevel::Error = level {
         super::emit_compile_error_invocation(q, span, msg);
         return;

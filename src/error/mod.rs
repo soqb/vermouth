@@ -7,18 +7,43 @@ use proc_macro::Span;
 
 use crate::{IntoTokens, Parser, ParserPos, ToSpan, TokenQueue};
 
-#[cfg_attr(
-    feature = "unstable-diagnostics-backend-stdlib",
-    path = "emit_stdlib.rs"
-)]
-#[cfg_attr(
-    all(
-        not(feature = "unstable-diagnostics-backend-stdlib"),
-        feature = "unstable-diagnostics-backend-format-json"
-    ),
-    path = "emit_format_json.rs"
-)]
-mod emit;
+// FIXME: cleanup as much as possible !!
+
+#[cfg(any(
+    test,
+    not(any(
+        feature = "unstable-diagnostics-backend-format-json",
+        feature = "unstable-diagnostics-backend-stdlib"
+    ))
+))]
+#[path = "emit.rs"]
+#[allow(dead_code)]
+mod emit_fallback;
+
+#[cfg(all(
+    feature = "unstable-diagnostics-backend-format-json",
+    any(test, not(feature = "unstable-diagnostics-backend-stdlib"))
+))]
+#[allow(dead_code)]
+mod emit_format_json;
+
+#[cfg(feature = "unstable-diagnostics-backend-stdlib")]
+mod emit_stdlib;
+
+#[cfg(not(any(
+    feature = "unstable-diagnostics-backend-format-json",
+    feature = "unstable-diagnostics-backend-stdlib"
+)))]
+use emit_fallback as emit;
+
+#[cfg(all(
+    feature = "unstable-diagnostics-backend-format-json",
+    not(feature = "unstable-diagnostics-backend-stdlib")
+))]
+use emit_format_json as emit;
+
+#[cfg(feature = "unstable-diagnostics-backend-stdlib")]
+use emit_stdlib as emit;
 
 /// Emits an invocation of [the `compile_error` macro](compile_error) to report errors.
 #[allow(dead_code)]

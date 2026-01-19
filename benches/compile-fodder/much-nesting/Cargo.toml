@@ -9,5 +9,6 @@ publish = false
 upstream = { path = "upstream", package = "much-nesting-upstream", default-features = false }
 
 [features]
+default = ["vermouth", "dtolnay"]
 vermouth = ["upstream/vermouth"]
 dtolnay = ["upstream/dtolnay"]

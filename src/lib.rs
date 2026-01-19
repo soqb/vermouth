@@ -77,6 +77,15 @@ compile_error!(
     due to limitations in the implementation of `proc-macro2`"
 );
 
+#[cfg(all(
+    feature = "proc-macro2",
+    feature = "unstable-diagnostics-backend-format-json"
+))]
+compile_error!(
+    "`vermouth` does not support enabling both the `proc-macro2` and `unstable-diagnostics-backend-format-json` features \
+    due to limitations in the implementation of `proc-macro2`"
+);
+
 /// Imports either
 #[cfg_attr(not(feature = "proc-macro2"), doc = "[`proc_macro`] or `proc_macro2`")]
 #[cfg_attr(

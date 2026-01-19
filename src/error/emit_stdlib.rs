@@ -1,13 +1,8 @@
-use proc_macro::{Diagnostic, Level};
+use proc_macro::{Diagnostic, Level, Span};
 
 use crate::{DiagnosticLevel, ToSpan, TokenQueue};
 
-pub(super) fn emit(
-    _q: &mut TokenQueue,
-    level: DiagnosticLevel,
-    span: impl ToSpan,
-    msg: &impl ToString,
-) {
+pub(super) fn emit(_q: &mut TokenQueue, level: DiagnosticLevel, span: Span, msg: String) {
     let (span, msg) = (span.span(), msg.to_string());
     let level = match level {
         DiagnosticLevel::Error => Level::Error,

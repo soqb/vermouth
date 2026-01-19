@@ -62,7 +62,7 @@ quote = []
 ## Enables [parsing](crate::Parser).
 parse = ["dep:smallvec"]
 ## Provides support and utilities for parsing and handling Rust attributes.
-attributes = ["parse"]
+attributes = ["parse", "quote"]
 ## Enables emitting diagnostic warnings through the [`Diagnostic`] API.
 warnings = []
 
@@ -104,5 +104,6 @@ features = ["complete", "internal-document-features"]
 skip_feature_sets = [
     ["internal-document-features"],
     ["internal-r-a-hack"],
-    ["proc-macro2", "unstable-diagnostics-backend"],
+    ["proc-macro2", "unstable-diagnostics-backend-stdlib"],
+    ["proc-macro2", "unstable-diagnostics-backend-format-json"],
 ]
