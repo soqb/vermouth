@@ -36,6 +36,7 @@ pub fn main_with<R, F: frontend::Frontend + 'static>(
         bench_main(&bencher)
     }) {
         Ok(r) => r,
+        #[cfg(feature = "rustc-timings")]
         Err(payload) => {
             if let Some(x) = payload.downcast_ref() {
                 rustc::ProcessFailed::report(x).unwrap();
@@ -47,6 +48,8 @@ pub fn main_with<R, F: frontend::Frontend + 'static>(
 
             std::panic::panic_any(payload);
         }
+        #[cfg(not(feature = "rustc-timings"))]
+        Err(payload) => std::panic::panic_any(payload),
     };
 
     thread_frontend.join().unwrap().unwrap();

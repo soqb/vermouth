@@ -90,11 +90,7 @@ compile_error!(
 #[macro_export]
 macro_rules! ඞ_declare_test {
     () => {
-        #[cfg(all(
-            feature = "internal-dev-hack",
-            not(feature = "proc-macro2"),
-            not(feature = "internal-r-a-hack")
-        ))]
+        #[cfg(all(test, not(feature = "proc-macro2"), not(feature = "internal-r-a-hack")))]
         ::core::compile_error!("make sure to run tests with -Fproc-macro2");
         // even if we just spat out a compile error,
         // we still import a (non-functional) crate
@@ -122,6 +118,7 @@ mod queue;
 mod quote;
 mod span;
 mod to_tokens;
+mod verbatim;
 
 #[cfg(feature = "quote")]
 pub use quote::*;
@@ -129,7 +126,7 @@ pub use quote::*;
 #[cfg(feature = "parse")]
 pub use self::{error::*, parser::*, pat::*};
 
-pub use self::{ext::*, queue::*, span::*, to_tokens::*};
+pub use self::{ext::*, queue::*, span::*, to_tokens::*, verbatim::*};
 
 #[doc(hidden)]
 #[path = "macro_exports/mod.rs"]
@@ -140,14 +137,14 @@ pub mod attributes;
 
 #[cfg(all(test, feature = "attributes", feature = "quote"))]
 mod tests {
+    ඞ_declare_test!();
+
     use proc_macro::{Ident, Literal, Span, TokenStream, TokenTree};
 
     use crate::{
         Expected, Parse, Parser, ParserPos, Result, Spanned, attributes::Attribute, punct_pat,
         quote,
     };
-
-    ඞ_declare_test!();
 
     #[test]
     fn parsing() {

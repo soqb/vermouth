@@ -97,7 +97,7 @@ impl Syntax {
     }
 }
 
-/// Builds an [diagnostic](Diagnostic) which represents some syntax which was expected.
+/// Builds a [diagnostic](Diagnostic) which represents some syntax which was expected.
 ///
 /// After construction, syntax variants can be chained with
 /// [`Expected::or_lit`] and [`Expected::or_noun`],
