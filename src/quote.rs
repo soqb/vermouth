@@ -4,7 +4,7 @@ use proc_macro::{Punct, Spacing, Span, TokenStream};
 
 // dawg i'm so tired of doing this
 #[cfg(doc)]
-use crate::{quote, verbatim};
+use crate::{Verbatim, quote, verbatim};
 
 use crate::{IntoTokens, TokenQueue};
 

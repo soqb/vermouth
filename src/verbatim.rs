@@ -4,7 +4,7 @@ use proc_macro::{Span, TokenStream};
 
 use crate::{IntoTokens, PushToken, TokenQueue};
 
-/// A verbatim token. See [the `verbatim` macro](verbatim).
+/// A verbatim token. See [the `verbatim` macro](crate::verbatim!).
 #[derive(Debug, Clone, Copy)]
 pub struct Verbatim {
     text: &'static str,
@@ -47,7 +47,7 @@ impl Verbatim {
         }
     }
 
-    /// See [`Transcriber::with_span`].
+    /// See [`Transcriber::with_span`](crate::Transcriber::with_span).
     pub const fn with_span(mut self, span: Span) -> Verbatim {
         self.span = Some(span);
         self
