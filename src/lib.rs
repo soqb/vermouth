@@ -5,9 +5,10 @@
     html_favicon_url = "https://raw.githubusercontent.com/soqb/vermouth/trunk/assets/logo-icon.png"
 )]
 #![cfg_attr(
-    feature = "unstable-diagnostics-backend-stdlib",
+    // a r-a bug? not sure why both are needed..
+    any(exhaustive, feature = "unstable-diagnostics-backend-stdlib"),
     feature(
-        // the `vermouth` feature `"unstable-diagnostics-backend"`
+        // the `vermouth` feature `"unstable-diagnostics-backend-stdlib"`
         // requires a nightly toolchain.
         proc_macro_diagnostic,
     )
@@ -53,7 +54,7 @@
 //! [`syn`]: https://crates.io/crates/syn
 //!
 #![cfg_attr(
-    feature = "internal-document-features",
+    feature = "_document-features",
     doc = document_features::document_features!(
         feature_label = r##"<a class="stab portability" id="feature-{feature}" href="#feature-{feature}"><code>{feature}</code></a>"##
     ),
@@ -99,8 +100,9 @@ compile_error!(
 #[macro_export]
 macro_rules! ඞ_declare_test {
     () => {
-        #[cfg(all(test, not(feature = "proc-macro2"), not(feature = "internal-r-a-hack")))]
+        #[cfg(all(not(feature = "proc-macro2"), not(exhaustive)))]
         ::core::compile_error!("make sure to run tests with -Fproc-macro2");
+
         // even if we just spat out a compile error,
         // we still import a (non-functional) crate
         // to suppress errors about bad imports.

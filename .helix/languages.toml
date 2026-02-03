@@ -1,0 +1,14 @@
+[language-server.rust-analyzer.config.check]
+command = "check"
+
+[language-server.rust-analyzer.config.cargo]
+cfgs = [
+    "debug_assertions",
+    "miri",
+    "exhaustive",
+]
+features = ["_nightly-exhaustive"]
+targetDir = "target/r-a"
+
+[language-server.rust-analyzer.config.cargo.extraEnv]
+RUSTFLAGS = "--cfg=exhaustive"

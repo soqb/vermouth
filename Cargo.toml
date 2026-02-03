@@ -35,6 +35,9 @@ macrobench = { version = "0.1.0", path = "macrobench" }
 # that `proc-macro2` matches `proc_macro` in enough detail.
 version = ">=1.0.103, <=1.0.105"
 
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(exhaustive)'] }
+
 [workspace.lints.clippy]
 toplevel_ref_arg = "allow"
 type_complexity = "allow"
@@ -94,16 +97,16 @@ unstable-diagnostics-backend-stdlib = []
 unstable-diagnostics-backend-format-json = []
 
 # do not enable. used for docs.rs only.
-internal-document-features = ["dep:document-features"]
-internal-r-a-hack = []
+_document-features = ["dep:document-features"]
+_nightly-exhaustive = ["complete", "unstable-diagnostics-backend-stdlib", "unstable-diagnostics-backend-format-json"]
 
 [package.metadata.docs.rs]
-features = ["complete", "internal-document-features"]
+features = ["complete", "_document-features"]
 
 [package.metadata.cargo-all-features]
 skip_feature_sets = [
-    ["internal-document-features"],
-    ["internal-r-a-hack"],
+    ["_document-features"],
+    ["_nightly-exhaustive"],
     ["proc-macro2", "unstable-diagnostics-backend-stdlib"],
     ["proc-macro2", "unstable-diagnostics-backend-format-json"],
 ]

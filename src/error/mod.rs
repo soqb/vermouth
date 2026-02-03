@@ -7,66 +7,76 @@ use proc_macro::Span;
 
 use crate::{IntoTokens, Parser, ParserPos, ToSpan, TokenQueue};
 
-// FIXME: cleanup as much as possible !!
+macro_rules! cfg_select {
+    {
+        $(_ => { $($it:item)* })?
+    } => {
+        $($($it)*)?
+    };
+    {
+        $cfg:meta => { $($it:item)* }
+        $($r:tt)*
+    } => {
+        #[cfg($cfg)]
+        cfg_select! {
+            _ => {
+                $($it)*
+            }
+        }
+        #[cfg(not($cfg))]
+        cfg_select! {
+            $($r)*
+        }
+    };
+}
+cfg_select! {
+    // r-a bug doesn't like just `exhaustive => ..` :((
+    any(exhaustive) => {
+        mod emit;
 
-#[cfg(any(
-    test,
-    not(any(
-        feature = "unstable-diagnostics-backend-format-json",
-        feature = "unstable-diagnostics-backend-stdlib"
-    ))
-))]
-#[path = "emit.rs"]
-#[allow(dead_code)]
-mod emit_fallback;
+        #[cfg(feature = "unstable-diagnostics-backend-format-json")]
+        #[allow(dead_code)]
+        mod emit_stdlib;
 
-#[cfg(all(
-    feature = "unstable-diagnostics-backend-format-json",
-    any(test, not(feature = "unstable-diagnostics-backend-stdlib"))
-))]
-#[allow(dead_code)]
-mod emit_format_json;
-
-#[cfg(feature = "unstable-diagnostics-backend-stdlib")]
-mod emit_stdlib;
-
-#[cfg(not(any(
-    feature = "unstable-diagnostics-backend-format-json",
-    feature = "unstable-diagnostics-backend-stdlib"
-)))]
-use emit_fallback as emit;
-
-#[cfg(all(
-    feature = "unstable-diagnostics-backend-format-json",
-    not(feature = "unstable-diagnostics-backend-stdlib")
-))]
-use emit_format_json as emit;
-
-#[cfg(feature = "unstable-diagnostics-backend-stdlib")]
-use emit_stdlib as emit;
+        #[cfg(feature = "unstable-diagnostics-backend-stdlib")]
+        #[allow(dead_code)]
+        mod emit_format_json;
+    }
+    feature = "unstable-diagnostics-backend-stdlib" => {
+        #[path = "emit_stdlib.rs"]
+        mod emit;
+    }
+    feature = "unstable-diagnostics-backend-format-json" => {
+        #[path = "emit_format_json.rs"]
+        mod emit;
+    }
+    _ => {
+        mod emit;
+    }
+}
 
 /// Emits an invocation of [the `compile_error` macro](compile_error) to report errors.
 #[allow(dead_code)]
 pub(self) fn emit_compile_error_invocation(q: &mut TokenQueue, span: Span, msg: String) {
     use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, TokenStream, TokenTree};
-    // NB: we don't have access to the `quote`, since that macro is behind an orthogonal feature.
+    // NB: we don't have access to `quote`, since that macro is behind an orthogonal feature.
     macro_rules! quote_path {
-        ($buf:ident <-) => {};
-        ($buf:ident <- :: $n:ident $(:: $r:ident)*) => {
+        () => {};
+        (:: $n:ident $(:: $r:ident)*) => {
             let mut p = Punct::new(':', Spacing::Joint);
             p.set_span(span);
-            $buf.push(p);
+            q.push(p);
             let mut p = Punct::new(':', Spacing::Alone);
             p.set_span(span);
-            $buf.push(p);
-            $buf.push(Ident::new(stringify!($n), span));
+            q.push(p);
+            q.push(Ident::new(stringify!($n), span));
 
             // recurse
-            quote_path!($buf <- $(:: $r)*)
+            quote_path!($(:: $r)*)
         };
     }
 
-    quote_path!(q <- ::core::compile_error);
+    quote_path!(::core::compile_error);
 
     q.push(Punct::new('!', Spacing::Alone));
 
