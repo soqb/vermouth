@@ -1,6 +1,6 @@
 [package]
 name = "vermouth"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2024"
 description = "a new kind of parser for procedural macros"
 license = "MIT OR Apache-2.0"
